@@ -273,5 +273,3 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 MIT License - see [LICENSE](LICENSE) for details.
 
 ---
-
-Built with determination by [@jamilshaikh07](https://github.com/jamilshaikh07)
