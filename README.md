@@ -1,20 +1,46 @@
-# Autofix-Dojo
+# autofix-dojo
 
-Autonomous vulnerability remediation service that integrates DefectDojo with Kubernetes deployments. It fetches HIGH/CRITICAL vulnerabilities, suggests safe image version bumps, and automatically creates pull requests to update your Kubernetes manifests or Helm values.
+> Autonomous vulnerability remediation for Kubernetes. Fix CVEs while you sleep.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![DefectDojo](https://img.shields.io/badge/DefectDojo-Compatible-green.svg)](https://www.defectdojo.com/)
+
+**autofix-dojo** connects to your DefectDojo instance, identifies vulnerable container images, bumps them to patched versions, and opens pull requests automatically. It's your first step toward autonomous InfraOps.
+
+## Features
+
+- **DefectDojo Integration** - Fetch Critical/High findings via REST API
+- **Smart Image Versioning** - Suggests safe patch-level updates using semver logic
+- **Kubernetes-Native** - Updates Deployments, Helm values, and YAML manifests
+- **Git Automation** - Creates branches, commits, and PRs via `gh`/`glab` CLI
+- **SLO Tracking** - Measures auto-fix success rate over time
+- **Dry-Run Mode** - Preview changes without modifying anything
+- **GitHub & GitLab Support** - Works with both platforms out of the box
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐     ┌─────────┐
-│ DefectDojo  │────▶│ Autofix-Dojo │────▶│  Git Repo   │────▶│ Argo CD │
-│  (Scanner)  │     │   (Fixer)    │     │  (PR/MR)    │     │ (Deploy)│
-└─────────────┘     └──────────────┘     └─────────────┘     └─────────┘
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   DefectDojo    │────▶│   autofix-dojo   │────▶│   Git (GitHub/  │
+│   (Findings)    │     │                  │     │     GitLab)     │
+└─────────────────┘     └────────┬─────────┘     └────────┬────────┘
+                                 │                        │
+                                 │                        ▼
+                        ┌────────▼─────────┐     ┌─────────────────┐
+                        │  K8s Manifests/  │     │     ArgoCD      │
+                        │   Helm Values    │     │   (GitOps Sync) │
+                        └──────────────────┘     └─────────────────┘
 ```
 
-1. **DefectDojo** stores vulnerability findings from your scanners
-2. **Autofix-Dojo** fetches findings, determines safe fixes, creates branches and PRs
-3. **Git** receives PRs with updated image tags in manifests
-4. **Argo CD** syncs on merge and deploys the fixed versions
+## How It Works
+
+1. **Fetch** - Queries DefectDojo API for open Critical/High vulnerabilities
+2. **Analyze** - Groups findings by container image and determines fix candidates
+3. **Suggest** - Uses known-safe mappings or semver patch bumps to suggest updates
+4. **Update** - Modifies Kubernetes manifests and Helm values in your GitOps repo
+5. **PR** - Creates a pull request with detailed change summary
+6. **Track** - Records SLO metrics for compliance reporting
 
 ## Working Demo
 
@@ -50,59 +76,59 @@ Successfully fixed: 1
 SLO:               25.0%
 ```
 
-## Prerequisites
-
-- Running DefectDojo instance with API access
-- Local clone of your Kubernetes manifests / Helm charts repo
-- Python 3.11+ or Docker
-- `gh` (GitHub CLI) or `glab` (GitLab CLI) authenticated
-
 ## Quick Start
 
 ```bash
-# Clone and setup
+# Clone the repository
+git clone https://github.com/jamilshaikh07/autofix-dojo.git
 cd autofix-dojo
-python3 -m venv .venv
+
+# Create virtual environment
+python -m venv .venv
 source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-# Configure
+# Configure environment
 cp .env.example .env
-# Edit .env with your values (see Configuration section)
+# Edit .env with your values
 
 # Seed DefectDojo with test data (optional)
 python scripts/seed_dojo.py
 
-# List findings
-python -m autofix.cli list-findings
-
-# Dry run
+# Run in dry-run mode first
 python -m autofix.cli scan-and-fix --dry-run
 
-# Create PRs
+# Run for real
 python -m autofix.cli scan-and-fix
-
-# View SLO
-python -m autofix.cli show-slo
 ```
+
+## Requirements
+
+- Python 3.11+
+- Git
+- GitHub CLI (`gh`) or GitLab CLI (`glab`)
+- Access to a DefectDojo instance
+- A GitOps repository with Kubernetes manifests
 
 ## Configuration
 
-Create a `.env` file with the following:
+Create a `.env` file or set environment variables:
 
 ```bash
-# DefectDojo Configuration
-DEFECTDOJO_URL=http://localhost:8080
+# DefectDojo
+DEFECTDOJO_URL=https://defectdojo.example.com
 DEFECTDOJO_API_KEY=your-api-key-here
 DEFECTDOJO_PRODUCT_ID=1
 
-# Git Configuration
-GIT_REPO_PATH=/path/to/your/gitops-repo
+# Git
+GIT_REPO_PATH=/path/to/your/k8s-manifests
 GIT_REMOTE=origin
-GIT_MAIN_BRANCH=main  # or master
-GIT_PLATFORM=github   # or gitlab
+GIT_MAIN_BRANCH=main
+GIT_PLATFORM=github  # or gitlab
 
-# Argo CD (optional)
+# ArgoCD (optional)
 ARGO_ENABLED=false
 
 # SLO Tracking
@@ -122,61 +148,22 @@ print(f'API_KEY={token.key}')
 "
 ```
 
-## Usage
+## CLI Commands
 
-### Scan and Fix
 ```bash
-# Full run - fetch findings, create PRs
+# Scan and auto-fix vulnerabilities
 python -m autofix.cli scan-and-fix
-
-# Dry run - see what would happen
 python -m autofix.cli scan-and-fix --dry-run
+python -m autofix.cli scan-and-fix --severity Critical
 
-# Filter severity
-python -m autofix.cli scan-and-fix -s Critical
-```
-
-### View SLO Metrics
-```bash
-python -m autofix.cli show-slo
-```
-
-Output:
-```
-==================================================
-📊 Vulnerability SLO Summary
-==================================================
-Total runs:              1
-Total findings processed: 4
-Total auto-fixed:         1
-Average SLO:              25.0%
-Latest SLO:               25.0%
-
-📈 Recent Runs:
-  2025-12-02T16:35:55: 1/4 fixed (25.0%)
-```
-
-### List Findings
-```bash
+# List open findings
 python -m autofix.cli list-findings
-python -m autofix.cli list-findings -s Critical -l 10
-```
+python -m autofix.cli list-findings --severity Critical --limit 50
 
-Output:
-```
-Found 4 open findings:
+# View SLO metrics
+python -m autofix.cli show-slo
 
-🔴 [Critical] CVE-2024-1234: Buffer Overflow in Traefik/Whoami
-   Image: traefik/whoami:latest
-   ID: 1
-
-🟠 [High] CVE-2024-5678: Nginx Security Vulnerability
-   Image: nginx:1.23.1
-   ID: 2
-```
-
-### Smoke Test Deployment
-```bash
+# Smoke test a deployment
 python -m autofix.cli smoke-test my-deployment -n my-namespace
 ```
 
@@ -184,7 +171,7 @@ python -m autofix.cli smoke-test my-deployment -n my-namespace
 
 ```bash
 # Build
-docker build -f docker/Dockerfile -t autofix-dojo .
+docker build -t autofix-dojo -f docker/Dockerfile .
 
 # Run
 docker run --rm \
@@ -193,7 +180,7 @@ docker run --rm \
   -e DEFECTDOJO_URL=https://dojo.example.com \
   -e DEFECTDOJO_API_KEY=xxx \
   -e GIT_REPO_PATH=/manifests \
-  autofix-dojo scan-and-fix
+  autofix-dojo scan-and-fix --dry-run
 ```
 
 ## Project Structure
@@ -219,16 +206,6 @@ autofix-dojo/
 └── README.md
 ```
 
-## Vulnerability SLO
-
-The service tracks a simple SLO metric:
-
-```
-SLO % = (auto_fixed_findings / total_findings) * 100
-```
-
-This measures what percentage of HIGH/CRITICAL vulnerabilities were automatically remediated via PRs. Use `show-slo` to view historical trends.
-
 ## Known Safe Versions
 
 The fixer includes mappings for common images:
@@ -243,9 +220,58 @@ The fixer includes mappings for common images:
 
 For unknown versions, the fixer increments the patch version by 3.
 
-## Extending
+## Vulnerability SLO
 
-- **Cron job**: Run `scan-and-fix` on a schedule
-- **Kubernetes CronJob**: Deploy in-cluster for periodic runs
-- **Custom fix logic**: Extend `fixer.py` with registry lookups or policy rules
-- **Registry Integration**: Query Docker Hub/ECR for actual latest patch versions
+The service tracks a simple SLO metric:
+
+```
+SLO % = (auto_fixed_findings / total_findings) * 100
+```
+
+This measures what percentage of HIGH/CRITICAL vulnerabilities were automatically remediated via PRs. Use `show-slo` to view historical trends.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the full vision.
+
+| Version | Milestone |
+|---------|-----------|
+| v0.1 | MVP - DefectDojo + GitHub PRs |
+| v0.2 | Improved fixer logic, registry lookups |
+| v0.3 | GitLab MR support |
+| v0.4 | ArgoCD sync integration |
+| v0.5 | Kubernetes CronJob mode |
+| v1.0 | InfraOps Autonomous Engine |
+
+## Why Open Source?
+
+Security automation shouldn't be locked behind enterprise paywalls. By open-sourcing autofix-dojo, we aim to:
+
+- Give every team access to vulnerability auto-remediation
+- Build a community around autonomous InfraOps
+- Learn from real-world usage patterns
+- Accelerate the path to fully autonomous infrastructure
+
+## Screenshots
+
+<!-- TODO: Add screenshots -->
+![Dashboard](docs/images/dashboard-placeholder.png)
+*DefectDojo findings list*
+
+![PR Example](docs/images/pr-placeholder.png)
+*Auto-generated pull request*
+
+![SLO Report](docs/images/slo-placeholder.png)
+*SLO tracking output*
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+Built with determination by [@jamilshaikh07](https://github.com/jamilshaikh07)
