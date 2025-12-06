@@ -1,0 +1,77 @@
+# Homelab deployment values for autofix-dojo
+# Minimal setup for testing on local Talos cluster
+
+image:
+  repository: ghcr.io/jamilshaikh07/autofix-dojo
+  tag: "0.2.0"
+  pullPolicy: IfNotPresent
+
+# Disable controller for now - use CronJob mode
+controller:
+  enabled: false
+
+# DefectDojo - disabled for initial test
+defectdojo:
+  enabled: false
+  url: ""
+  existingSecret: ""
+  productId: "1"
+
+# Git Configuration - disabled for initial test
+git:
+  enabled: false
+  repoUrl: ""
+  mainBranch: "master"
+  platform: "github"
+
+# Helm Chart Scanning - main feature to test
+helm:
+  enabled: true
+  scanPath: "/terraform"
+  scanInterval: "24h"
+
+# Scan Schedule
+schedule:
+  vulnerabilities: "0 */12 * * *"  # Every 12 hours
+  helmDrift: "0 0 * * *"  # Daily at midnight
+
+# SLO tracking
+slo:
+  enabled: true
+  dbPath: "/data/slo_data.json"
+
+# Persistence - use longhorn if available
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  size: 1Gi
+
+# Minimal resources for homelab
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Security context
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: false  # Need write access for /tmp
+  allowPrivilegeEscalation: false
+
+# Metrics
+metrics:
+  enabled: false
+
+# No notifications for homelab testing
+notifications:
+  slack:
+    enabled: false
+  email:
+    enabled: false

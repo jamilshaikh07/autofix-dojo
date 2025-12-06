@@ -1,0 +1,116 @@
+{{- if .Values.serviceAccount.create -}}
+# ClusterRole for autofix-dojo operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+rules:
+  # Core Kubernetes resources - read access for scanning
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - configmaps
+      - secrets
+      - namespaces
+    verbs: ["get", "list", "watch"]
+
+  # Deployments, StatefulSets, DaemonSets for image scanning
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs: ["get", "list", "watch"]
+
+  # CronJobs
+  - apiGroups: ["batch"]
+    resources:
+      - cronjobs
+      - jobs
+    verbs: ["get", "list", "watch"]
+
+  # Custom Resource - AutofixPolicy
+  - apiGroups: ["autofix.dojo.io"]
+    resources:
+      - autofixpolicies
+      - autofixpolicies/status
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Flux HelmRelease (if using Flux)
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources:
+      - helmreleases
+    verbs: ["get", "list", "watch"]
+
+  # ArgoCD Application (if using ArgoCD)
+  - apiGroups: ["argoproj.io"]
+    resources:
+      - applications
+    verbs: ["get", "list", "watch"]
+
+  # Events for logging operator activity
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs: ["create", "patch"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "autofix-dojo.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "autofix-dojo.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+
+---
+# Role for namespace-specific operations (secrets access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources:
+      - secrets
+      - configmaps
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding for namespace-specific operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "autofix-dojo.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "autofix-dojo.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

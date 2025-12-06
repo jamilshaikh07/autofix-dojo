@@ -1,0 +1,24 @@
+apiVersion: v2
+name: autofix-dojo
+description: Autonomous vulnerability remediation and Helm chart upgrade operator for Kubernetes
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+home: https://github.com/jamilshaikh07/autofix-dojo
+sources:
+  - https://github.com/jamilshaikh07/autofix-dojo
+maintainers:
+  - name: Jamil Shaikh
+    url: https://github.com/jamilshaikh07
+keywords:
+  - security
+  - vulnerability
+  - defectdojo
+  - helm
+  - kubernetes
+  - auto-remediation
+  - gitops
+  - devops
+  - devsecops
+annotations:
+  category: Security

@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autofix-dojo"
+version = "0.2.0"
+description = "Autonomous Vulnerability Remediation & Helm Chart Upgrade Operator"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Jamil Shaikh", email = "jamil@example.com"}
+]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "typer>=0.9.0",
+    "pydantic>=2.0.0",
+    "PyYAML>=6.0.0",
+    "kubernetes>=28.1.0",
+    "prometheus-client>=0.19.0",
+    "aiohttp>=3.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[project.scripts]
+autofix-dojo = "autofix.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jamilshaikh07/autofix-dojo"
+Repository = "https://github.com/jamilshaikh07/autofix-dojo"
+Issues = "https://github.com/jamilshaikh07/autofix-dojo/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["autofix*"]

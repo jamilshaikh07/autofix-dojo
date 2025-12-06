@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}-vuln-scan
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vulnerability-scanner
+spec:
+  schedule: {{ .Values.schedule.vulnerabilities | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "autofix-dojo.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: vulnerability-scanner
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          serviceAccountName: {{ include "autofix-dojo.serviceAccountName" . }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          restartPolicy: OnFailure
+          containers:
+            - name: scanner
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                - python
+                - -m
+                - autofix.cli
+                - scan-and-fix
+                - --dry-run  # Remove for actual fixes
+              envFrom:
+                - configMapRef:
+                    name: {{ include "autofix-dojo.fullname" . }}-config
+              env:
+                - name: DEFECTDOJO_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "autofix-dojo.defectdojoSecretName" . }}
+                      key: api-key
+                {{- with .Values.extraEnvVars }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              volumeMounts:
+                {{- if .Values.persistence.enabled }}
+                - name: data
+                  mountPath: /data
+                {{- end }}
+                {{- with .Values.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          volumes:
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              persistentVolumeClaim:
+                claimName: {{ include "autofix-dojo.fullname" . }}-data
+            {{- end }}
+            {{- with .Values.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

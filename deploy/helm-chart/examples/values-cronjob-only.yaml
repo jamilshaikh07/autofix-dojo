@@ -1,0 +1,55 @@
+# Example values for CronJob-only mode (no controller/operator)
+# Simpler deployment that runs scans on schedule
+
+image:
+  repository: ghcr.io/jamilshaikh07/autofix-dojo
+  tag: "0.2.0"
+
+# Disable controller mode - use CronJobs only
+controller:
+  enabled: false
+
+# DefectDojo Configuration
+defectdojo:
+  enabled: true
+  url: "https://defectdojo.example.com"
+  existingSecret: "defectdojo-api-key"
+  productId: "1"
+
+# Git Configuration
+git:
+  enabled: true
+  repoUrl: "https://github.com/myorg/infrastructure"
+  mainBranch: "main"
+  platform: "github"
+  existingSecret: "github-token"
+
+# Helm Chart Scanning
+helm:
+  enabled: true
+  scanPath: "/terraform"
+  scanInterval: "24h"
+
+# CronJob Schedules
+schedule:
+  vulnerabilities: "0 6 * * *"  # Daily at 6 AM
+  helmDrift: "0 0 * * 1"  # Weekly on Monday midnight
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""  # Use default
+  size: 1Gi
+
+# Minimal resources for batch jobs
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Disable metrics in CronJob mode
+metrics:
+  enabled: false

@@ -1,3 +1,17 @@
+# Core dependencies
 requests>=2.31.0
 python-dotenv>=1.0.0
 typer>=0.9.0
+pydantic>=2.0.0
+PyYAML>=6.0.0
+
+# Kubernetes integration
+kubernetes>=28.1.0
+
+# For controller/operator mode
+prometheus-client>=0.19.0
+aiohttp>=3.9.0
+
+# Development/Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0

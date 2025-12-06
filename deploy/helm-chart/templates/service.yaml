@@ -1,0 +1,20 @@
+{{- if and .Values.controller.enabled .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "autofix-dojo.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+{{- end }}

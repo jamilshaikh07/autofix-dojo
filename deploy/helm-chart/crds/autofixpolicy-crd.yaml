@@ -1,0 +1,241 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: autofixpolicies.autofix.dojo.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  labels:
+    app.kubernetes.io/name: autofix-dojo
+    app.kubernetes.io/part-of: autofix-dojo
+spec:
+  group: autofix.dojo.io
+  names:
+    kind: AutofixPolicy
+    listKind: AutofixPolicyList
+    plural: autofixpolicies
+    singular: autofixpolicy
+    shortNames:
+      - afp
+      - afpolicy
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: AutofixPolicy defines the desired state for auto-remediation
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: AutofixPolicySpec defines the configuration for auto-remediation
+              properties:
+                # Target Selection
+                targetSelector:
+                  type: object
+                  description: Select which resources to scan and fix
+                  properties:
+                    namespaces:
+                      type: array
+                      description: Namespaces to scan (empty means all)
+                      items:
+                        type: string
+                    labelSelector:
+                      type: object
+                      description: Label selector for resources
+                      properties:
+                        matchLabels:
+                          type: object
+                          additionalProperties:
+                            type: string
+                    resourceTypes:
+                      type: array
+                      description: Resource types to scan
+                      items:
+                        type: string
+                        enum:
+                          - Deployment
+                          - StatefulSet
+                          - DaemonSet
+                          - CronJob
+                          - HelmRelease
+
+                # Vulnerability Settings
+                vulnerabilities:
+                  type: object
+                  description: Vulnerability scanning settings
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                    severities:
+                      type: array
+                      description: Severity levels to fix
+                      items:
+                        type: string
+                        enum:
+                          - Critical
+                          - High
+                          - Medium
+                          - Low
+                      default:
+                        - Critical
+                        - High
+                    autoFix:
+                      type: boolean
+                      description: Automatically create PRs for fixes
+                      default: false
+                    scanInterval:
+                      type: string
+                      description: How often to scan (e.g., 6h, 1d)
+                      default: "6h"
+
+                # Helm Chart Settings
+                helmCharts:
+                  type: object
+                  description: Helm chart drift detection settings
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                    terraformPath:
+                      type: string
+                      description: Path to Terraform files with helm_release
+                    scanInterval:
+                      type: string
+                      description: How often to scan (e.g., 24h)
+                      default: "24h"
+                    maxVersionGap:
+                      type: integer
+                      description: Max major versions behind before alerting
+                      default: 2
+                    generateRoadmaps:
+                      type: boolean
+                      description: Auto-generate upgrade roadmaps for critical charts
+                      default: true
+
+                # Git Integration
+                git:
+                  type: object
+                  description: Git repository settings for PRs
+                  properties:
+                    repoUrl:
+                      type: string
+                      description: Git repository URL
+                    branch:
+                      type: string
+                      description: Target branch for PRs
+                      default: "main"
+                    platform:
+                      type: string
+                      enum:
+                        - github
+                        - gitlab
+                      default: "github"
+                    secretRef:
+                      type: object
+                      description: Reference to secret with Git credentials
+                      properties:
+                        name:
+                          type: string
+                        key:
+                          type: string
+                          default: "token"
+
+                # Notifications
+                notifications:
+                  type: object
+                  description: Notification settings
+                  properties:
+                    slack:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        webhookSecretRef:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            key:
+                              type: string
+                        channel:
+                          type: string
+                    email:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        recipients:
+                          type: array
+                          items:
+                            type: string
+
+            status:
+              type: object
+              description: AutofixPolicyStatus shows the current state
+              properties:
+                lastScanTime:
+                  type: string
+                  format: date-time
+                lastScanResult:
+                  type: string
+                  enum:
+                    - Success
+                    - Failed
+                    - Pending
+                vulnerabilitiesFound:
+                  type: integer
+                vulnerabilitiesFixed:
+                  type: integer
+                helmChartsOutdated:
+                  type: integer
+                sloPercentage:
+                  type: number
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Last Scan
+          type: date
+          jsonPath: .status.lastScanTime
+        - name: Vulns Found
+          type: integer
+          jsonPath: .status.vulnerabilitiesFound
+        - name: Vulns Fixed
+          type: integer
+          jsonPath: .status.vulnerabilitiesFixed
+        - name: Helm Outdated
+          type: integer
+          jsonPath: .status.helmChartsOutdated
+        - name: SLO %
+          type: number
+          jsonPath: .status.sloPercentage
+        - name: Status
+          type: string
+          jsonPath: .status.lastScanResult

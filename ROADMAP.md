@@ -11,7 +11,17 @@ The journey from MVP to autonomous InfraOps engine.
 - [x] CLI interface
 - [x] Docker support
 
-## v0.2 - Improved Fixer Logic
+## v0.2 - Helm Chart Support
+
+- [ ] Parse Terraform HCL for `helm_release` resources
+- [ ] Query Helm repositories for latest versions
+- [ ] Detect outdated Helm charts in Terraform/values files
+- [ ] Generate upgrade roadmaps (incremental path for breaking changes)
+- [ ] Update Terraform `version` attributes
+- [ ] Support for multi-step upgrades (e.g., Velero 4.x → 11.x)
+- [ ] Helm values.yaml migration suggestions
+
+## v0.3 - Improved Fixer Logic
 
 - [ ] Container registry API lookups (Docker Hub, GHCR, ECR)
 - [ ] Validate suggested versions actually exist
@@ -19,21 +29,21 @@ The journey from MVP to autonomous InfraOps engine.
 - [ ] Configurable fix strategies (patch-only, minor, latest)
 - [ ] CVE-to-fixed-version database integration
 
-## v0.3 - GitLab Support
+## v0.4 - GitLab Support
 
 - [ ] Full GitLab MR workflow
 - [ ] GitLab CI integration examples
 - [ ] Self-hosted GitLab compatibility
 - [ ] Merge request approval workflows
 
-## v0.4 - ArgoCD Integration
+## v0.5 - ArgoCD Integration
 
 - [ ] Trigger ArgoCD sync after PR merge
 - [ ] ArgoCD Application health checks
 - [ ] Rollback on failed deployments
 - [ ] Sync wave support for ordered updates
 
-## v0.5 - Kubernetes CronJob Mode
+## v0.6 - Kubernetes CronJob Mode
 
 - [ ] Helm chart for deployment
 - [ ] CronJob-based scheduled runs
@@ -41,7 +51,7 @@ The journey from MVP to autonomous InfraOps engine.
 - [ ] Prometheus metrics endpoint
 - [ ] Grafana dashboard templates
 
-## v0.6 - Operator Version
+## v0.7 - Operator Version
 
 - [ ] Custom Resource Definition (CRD): `AutofixPolicy`
 - [ ] Kubernetes Operator pattern

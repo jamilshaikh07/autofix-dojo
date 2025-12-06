@@ -1,0 +1,122 @@
+# autofix-dojo Helm Chart Values
+# Autonomous Vulnerability Remediation & Helm Chart Upgrade Operator
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/jamilshaikh07/autofix-dojo
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to chart appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  # For AWS EKS with IRSA:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/autofix-dojo-role
+  name: ""
+
+# Controller mode (operator pattern - watches AutofixPolicy CRDs)
+controller:
+  enabled: false  # Set to true for operator mode
+  reconcileInterval: "60s"
+
+# DefectDojo Configuration
+defectdojo:
+  enabled: true
+  url: ""  # Required: e.g., https://defectdojo.example.com
+  # API key - provide via existingSecret OR apiKey (for dev only)
+  existingSecret: ""  # Name of existing secret with 'api-key' key
+  apiKey: ""  # Not recommended for production
+  productId: "1"
+
+# Git Configuration
+git:
+  enabled: true
+  repoUrl: ""  # e.g., https://github.com/org/infra-repo
+  repoPath: "/repo"  # Path inside the container
+  remote: "origin"
+  mainBranch: "main"
+  platform: "github"  # github or gitlab
+  existingSecret: ""  # Name of existing secret with 'token' key
+  token: ""  # Not recommended for production
+
+# Helm Chart Scanning
+helm:
+  enabled: true
+  scanPath: "/terraform"  # Path to Terraform files
+  scanInterval: "6h"  # How often to scan for drift
+
+# Scan Schedule (CronJob)
+schedule:
+  # Vulnerability scan schedule
+  vulnerabilities: "0 */6 * * *"  # Every 6 hours
+  # Helm chart drift scan schedule
+  helmDrift: "0 0 * * *"  # Daily at midnight
+
+# SLO Configuration
+slo:
+  enabled: true
+  dbPath: "/data/slo_data.json"
+
+# Persistence for SLO data
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+
+# Resources
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Pod configuration
+podAnnotations: {}
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+# Node selection
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Additional environment variables
+extraEnvVars: []
+
+# Additional volume mounts (for git repo, terraform files, etc.)
+extraVolumeMounts: []
+extraVolumes: []
+
+# Notifications (future enhancement)
+notifications:
+  slack:
+    enabled: false
+    webhookUrl: ""
+    channel: "#security-alerts"
+  email:
+    enabled: false
+    smtp: ""
+    recipients: []
+
+# Metrics
+metrics:
+  enabled: true
+  port: 8080
+  serviceMonitor:
+    enabled: false
+    interval: 30s

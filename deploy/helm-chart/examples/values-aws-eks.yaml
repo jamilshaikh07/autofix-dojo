@@ -1,0 +1,100 @@
+# Example values for AWS EKS deployment
+# This configuration is designed for production use on AWS EKS
+
+image:
+  repository: ghcr.io/jamilshaikh07/autofix-dojo
+  tag: "0.2.0"
+
+serviceAccount:
+  create: true
+  annotations:
+    # Replace with your IAM role ARN for IRSA
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/autofix-dojo-role
+
+# Enable controller mode for operator pattern
+controller:
+  enabled: true
+  reconcileInterval: "60s"
+
+# DefectDojo Configuration
+defectdojo:
+  enabled: true
+  url: "https://defectdojo.example.com"
+  existingSecret: "defectdojo-api-key"  # Create this secret with 'api-key' key
+  productId: "1"
+
+# Git Configuration for PR creation
+git:
+  enabled: true
+  repoUrl: "https://github.com/myorg/infrastructure"
+  mainBranch: "main"
+  platform: "github"
+  existingSecret: "github-token"  # Create this secret with 'token' key
+
+# Helm Chart Scanning
+helm:
+  enabled: true
+  scanPath: "/infrastructure/terraform"
+  scanInterval: "6h"
+
+# Scan Schedule
+schedule:
+  vulnerabilities: "0 */6 * * *"  # Every 6 hours
+  helmDrift: "0 0 * * *"  # Daily at midnight
+
+# Persistence for SLO tracking
+persistence:
+  enabled: true
+  storageClass: "gp3"  # AWS EBS gp3
+  size: 5Gi
+
+# Resources - production sizing
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+# Security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# Node placement - prefer dedicated security nodes if available
+nodeSelector:
+  node-type: security
+
+tolerations:
+  - key: "security"
+    operator: "Equal"
+    value: "dedicated"
+    effect: "NoSchedule"
+
+# Notifications
+notifications:
+  slack:
+    enabled: true
+    channel: "#security-alerts"
+  email:
+    enabled: false
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  port: 8080
+  serviceMonitor:
+    enabled: true
+    interval: "30s"
+    labels:
+      prometheus: kube-prometheus

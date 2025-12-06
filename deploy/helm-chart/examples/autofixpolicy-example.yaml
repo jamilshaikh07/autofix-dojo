@@ -1,0 +1,113 @@
+# Example AutofixPolicy for vulnerability scanning and Helm chart management
+# This CR configures autofix-dojo to scan specific namespaces and generate PRs
+apiVersion: autofix.dojo.io/v1alpha1
+kind: AutofixPolicy
+metadata:
+  name: production-security-policy
+  namespace: autofix-dojo
+spec:
+  # Target Selection - which resources to scan
+  targetSelector:
+    namespaces:
+      - production
+      - staging
+    labelSelector:
+      matchLabels:
+        security-scan: enabled
+    resourceTypes:
+      - Deployment
+      - StatefulSet
+      - DaemonSet
+
+  # Vulnerability Settings
+  vulnerabilities:
+    enabled: true
+    severities:
+      - Critical
+      - High
+    autoFix: true  # Automatically create PRs
+    scanInterval: "6h"
+
+  # Helm Chart Settings
+  helmCharts:
+    enabled: true
+    terraformPath: "/infrastructure/terraform"
+    scanInterval: "24h"
+    maxVersionGap: 2  # Alert when 2+ major versions behind
+    generateRoadmaps: true
+
+  # Git Integration
+  git:
+    repoUrl: "https://github.com/myorg/infrastructure"
+    branch: "main"
+    platform: github
+    secretRef:
+      name: github-token
+      key: token
+
+  # Notifications
+  notifications:
+    slack:
+      enabled: true
+      webhookSecretRef:
+        name: slack-webhook
+        key: url
+      channel: "#security-alerts"
+    email:
+      enabled: false
+      recipients:
+        - security@company.com
+
+---
+# Minimal AutofixPolicy for development
+apiVersion: autofix.dojo.io/v1alpha1
+kind: AutofixPolicy
+metadata:
+  name: dev-scan-only
+  namespace: autofix-dojo
+spec:
+  targetSelector:
+    namespaces:
+      - development
+    resourceTypes:
+      - Deployment
+
+  vulnerabilities:
+    enabled: true
+    severities:
+      - Critical
+    autoFix: false  # Report only, no PRs
+    scanInterval: "12h"
+
+  helmCharts:
+    enabled: false
+
+---
+# AutofixPolicy for Helm-only scanning (no vulnerability scanning)
+apiVersion: autofix.dojo.io/v1alpha1
+kind: AutofixPolicy
+metadata:
+  name: helm-drift-detection
+  namespace: autofix-dojo
+spec:
+  targetSelector:
+    resourceTypes:
+      - HelmRelease
+
+  vulnerabilities:
+    enabled: false
+
+  helmCharts:
+    enabled: true
+    terraformPath: "/terraform/addons"
+    scanInterval: "24h"
+    maxVersionGap: 1
+    generateRoadmaps: true
+
+  git:
+    repoUrl: "https://github.com/myorg/helm-releases"
+    branch: "main"
+    platform: github
+    secretRef:
+      name: github-token
+      key: token
