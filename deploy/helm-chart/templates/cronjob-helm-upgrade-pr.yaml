@@ -40,13 +40,14 @@ spec:
                 - /bin/sh
                 - -c
                 - |
+                  set -e
                   rm -rf /repo/* /repo/.[!.]* 2>/dev/null || true
+                  git config --global user.email "autofix-dojo@automated.local"
+                  git config --global user.name "autofix-dojo"
                   git clone --depth 1 --branch {{ .Values.git.mainBranch }} \
                     https://x-access-token:${GITHUB_TOKEN}@github.com/{{ .Values.helm.autoPR.repoOwner }}/{{ .Values.helm.autoPR.repoName }}.git \
                     /repo
-                  cd /repo
-                  git config user.email "autofix-dojo@automated.local"
-                  git config user.name "autofix-dojo"
+                  echo "Git clone successful"
               env:
                 - name: GITHUB_TOKEN
                   valueFrom:
