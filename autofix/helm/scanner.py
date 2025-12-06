@@ -239,14 +239,17 @@ class HelmScanner:
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=30,  # 30 second timeout
             )
             if result.returncode == 0:
                 charts = json.loads(result.stdout)
                 if charts:
                     release.latest_version = charts[0].get("version")
                     release.latest_app_version = charts[0].get("app_version")
+        except subprocess.TimeoutExpired:
+            logger.debug(f"Timeout searching for {release.chart}")
         except Exception as e:
-            logger.warning(f"Failed to fetch latest version for {release.chart}: {e}")
+            logger.debug(f"Failed to fetch latest version for {release.chart}: {e}")
 
     def scan_argocd_apps(self, path: str | Path) -> list[HelmRelease]:
         """Scan ArgoCD Application YAML files for Helm chart sources."""
