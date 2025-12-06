@@ -465,6 +465,221 @@ def scan_images(
 
 
 @app.command()
+def helm_upgrade_pr(
+    path: str = typer.Argument(
+        ".",
+        help="Path to scan for Helm charts (ArgoCD apps or Terraform)",
+    ),
+    chart: str = typer.Option(
+        None,
+        "--chart",
+        "-c",
+        help="Specific chart to upgrade (default: all outdated)",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-n",
+        help="Show what would be done without making changes",
+    ),
+    priority: str = typer.Option(
+        "major",
+        "--priority",
+        "-p",
+        help="Minimum priority: critical, major, minor, or all",
+    ),
+) -> None:
+    """Scan for outdated Helm charts and create PRs for upgrades."""
+    import os
+    import re
+
+    # Validate Git configuration
+    git_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GIT_TOKEN")
+    repo_url = os.environ.get("GIT_REPO_URL")
+
+    if not git_token:
+        typer.echo("❌ GITHUB_TOKEN or GIT_TOKEN environment variable required", err=True)
+        raise typer.Exit(1)
+
+    if not repo_url:
+        typer.echo("❌ GIT_REPO_URL environment variable required", err=True)
+        raise typer.Exit(1)
+
+    scanner = HelmScanner()
+
+    # Scan for charts
+    typer.echo(f"🔍 Scanning for Helm charts in {path}...")
+    path_obj = Path(path)
+
+    if any(path_obj.rglob("*.tf")):
+        releases = scanner.scan_terraform_dir(path)
+    else:
+        releases = scanner.scan_argocd_apps(path)
+
+    if not releases:
+        typer.echo("No Helm charts found")
+        return
+
+    # Filter by priority
+    priority_levels = {"critical": 0, "major": 1, "minor": 2, "all": 3}
+    min_priority = priority_levels.get(priority, 1)
+
+    candidates = []
+    for r in releases:
+        r_priority = {"critical": 0, "major": 1, "minor": 2, "current": 4}.get(r.priority, 3)
+        if r_priority <= min_priority and r.is_outdated:
+            if chart is None or r.chart == chart or r.name == chart:
+                candidates.append(r)
+
+    if not candidates:
+        typer.echo("✅ No charts need upgrading at the specified priority level")
+        return
+
+    typer.echo(f"\n📋 Found {len(candidates)} chart(s) to upgrade:")
+    for r in candidates:
+        typer.echo(f"   {r.priority_emoji} {r.chart}: {r.current_version} → {r.latest_version}")
+
+    if dry_run:
+        typer.echo("\n🏃 Dry run mode - no changes made")
+        return
+
+    # Create PRs for each chart
+    typer.echo("\n🚀 Creating upgrade PRs...")
+
+    try:
+        config = Config.from_env()
+        git_client = GitClient(config)
+    except ValueError as e:
+        typer.echo(f"⚠️  Config warning: {e}")
+        typer.echo("Proceeding with environment variables...")
+        # Fallback: use git directly
+        git_client = None
+
+    success_count = 0
+    for release in candidates:
+        typer.echo(f"\nProcessing {release.chart}...")
+
+        if not release.source_file:
+            typer.echo(f"   ⚠️  No source file found for {release.chart}")
+            continue
+
+        source_path = Path(release.source_file)
+        if not source_path.exists():
+            typer.echo(f"   ⚠️  Source file not found: {source_path}")
+            continue
+
+        # Read the source file
+        content = source_path.read_text()
+
+        # Create upgrade branch
+        branch_name = f"autofix/helm-upgrade-{release.chart}-{release.latest_version}".replace(".", "-")
+        typer.echo(f"   Creating branch: {branch_name}")
+
+        # Update the version in the file
+        # Handle both Terraform and ArgoCD formats
+        old_version = release.current_version
+        new_version = release.latest_version
+
+        # Pattern for version = "x.y.z" (Terraform)
+        tf_pattern = rf'(version\s*=\s*["\'])({re.escape(old_version)})(["\'])'
+        tf_replacement = rf'\g<1>{new_version}\g<3>'
+
+        # Pattern for targetRevision: vx.y.z or x.y.z (ArgoCD)
+        argocd_pattern = rf'(targetRevision:\s*["\']?v?)({re.escape(old_version)})(["\']?)'
+        argocd_replacement = rf'\g<1>{new_version}\g<3>'
+
+        new_content = re.sub(tf_pattern, tf_replacement, content)
+        if new_content == content:
+            # Try ArgoCD pattern
+            new_content = re.sub(argocd_pattern, argocd_replacement, content)
+
+        if new_content == content:
+            typer.echo(f"   ⚠️  Could not find version to update in {source_path}")
+            continue
+
+        # Write the updated file
+        typer.echo(f"   Updating {source_path.name}...")
+
+        # Use git to create branch and PR
+        import subprocess
+        cwd = source_path.parent
+
+        # Find git root
+        git_root_result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, cwd=cwd
+        )
+        if git_root_result.returncode != 0:
+            typer.echo(f"   ❌ Not a git repository")
+            continue
+
+        git_root = Path(git_root_result.stdout.strip())
+        relative_path = source_path.relative_to(git_root)
+
+        # Create branch
+        subprocess.run(["git", "checkout", "-b", branch_name], cwd=git_root, capture_output=True)
+
+        # Write changes
+        source_path.write_text(new_content)
+
+        # Commit
+        subprocess.run(["git", "add", str(relative_path)], cwd=git_root, capture_output=True)
+        commit_msg = f"chore(helm): upgrade {release.chart} from {old_version} to {new_version}"
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=git_root, capture_output=True)
+
+        # Push
+        push_result = subprocess.run(
+            ["git", "push", "-u", "origin", branch_name],
+            cwd=git_root, capture_output=True, text=True
+        )
+
+        if push_result.returncode != 0:
+            typer.echo(f"   ❌ Failed to push: {push_result.stderr}")
+            # Restore main branch
+            subprocess.run(["git", "checkout", "-"], cwd=git_root, capture_output=True)
+            subprocess.run(["git", "branch", "-D", branch_name], cwd=git_root, capture_output=True)
+            continue
+
+        # Create PR using gh CLI
+        pr_title = f"chore(helm): upgrade {release.chart} to {new_version}"
+        pr_body = f"""## Helm Chart Upgrade
+
+**Chart:** {release.chart}
+**Current Version:** {old_version}
+**New Version:** {new_version}
+
+### Changes
+- Updated {relative_path}
+
+### Upgrade Notes
+Run `autofix-dojo helm-roadmap {release.chart} {old_version} {new_version}` for detailed upgrade path.
+
+---
+🤖 Generated by autofix-dojo
+"""
+
+        pr_result = subprocess.run(
+            ["gh", "pr", "create", "--title", pr_title, "--body", pr_body],
+            cwd=git_root, capture_output=True, text=True
+        )
+
+        # Return to main branch
+        subprocess.run(["git", "checkout", "-"], cwd=git_root, capture_output=True)
+
+        if pr_result.returncode == 0:
+            pr_url = pr_result.stdout.strip()
+            typer.echo(f"   ✅ PR created: {pr_url}")
+            success_count += 1
+        else:
+            typer.echo(f"   ⚠️  Push succeeded but PR creation failed: {pr_result.stderr}")
+            typer.echo(f"   Branch '{branch_name}' is ready for manual PR creation")
+            success_count += 1  # Still count as partial success
+
+    typer.echo("\n" + "=" * 50)
+    typer.echo(f"📊 Created {success_count}/{len(candidates)} upgrade PRs")
+
+
+@app.command()
 def version() -> None:
     """Show autofix-dojo version."""
     typer.echo("autofix-dojo v0.2.0")
