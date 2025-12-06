@@ -50,6 +50,14 @@ helm:
   enabled: true
   scanPath: "/terraform"  # Path to Terraform files
   scanInterval: "6h"  # How often to scan for drift
+  # Auto PR creation for Helm chart upgrades
+  autoPR:
+    enabled: false  # Set to true to auto-create PRs
+    schedule: "0 0 * * 1"  # Weekly on Monday at midnight
+    priority: "major"  # critical, major, minor, or all
+    repoOwner: ""  # GitHub owner/org (e.g., jamilshaikh07)
+    repoName: ""  # GitHub repo name (e.g., talos-proxmox-gitops)
+    scanPath: "gitops/apps"  # Path within repo to scan
 
 # Scan Schedule (CronJob)
 schedule:

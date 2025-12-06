@@ -1,0 +1,122 @@
+{{- if and .Values.helm.enabled .Values.helm.autoPR.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}-helm-upgrade-pr
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-upgrade-pr
+spec:
+  schedule: {{ .Values.helm.autoPR.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "autofix-dojo.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: helm-upgrade-pr
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          serviceAccountName: {{ include "autofix-dojo.serviceAccountName" . }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          restartPolicy: OnFailure
+          initContainers:
+            # Clone the GitOps repo
+            - name: git-clone
+              image: alpine/git:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  git clone --depth 1 --branch {{ .Values.git.mainBranch }} \
+                    https://x-access-token:${GITHUB_TOKEN}@github.com/{{ .Values.helm.autoPR.repoOwner }}/{{ .Values.helm.autoPR.repoName }}.git \
+                    /repo
+                  cd /repo
+                  git config user.email "autofix-dojo@automated.local"
+                  git config user.name "autofix-dojo"
+              env:
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.git.existingSecret }}
+                      key: token
+              volumeMounts:
+                - name: repo
+                  mountPath: /repo
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+          containers:
+            - name: helm-upgrade-pr
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                - python
+                - -m
+                - autofix.cli
+                - helm-upgrade-pr
+                - /repo/{{ .Values.helm.autoPR.scanPath }}
+                - --priority
+                - {{ .Values.helm.autoPR.priority }}
+              env:
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.git.existingSecret }}
+                      key: token
+                - name: GIT_REPO_URL
+                  value: "https://github.com/{{ .Values.helm.autoPR.repoOwner }}/{{ .Values.helm.autoPR.repoName }}"
+              envFrom:
+                - configMapRef:
+                    name: {{ include "autofix-dojo.fullname" . }}-config
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              volumeMounts:
+                {{- if .Values.persistence.enabled }}
+                - name: data
+                  mountPath: /data
+                {{- end }}
+                - name: repo
+                  mountPath: /repo
+                {{- with .Values.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          volumes:
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              persistentVolumeClaim:
+                claimName: {{ include "autofix-dojo.fullname" . }}-data
+            {{- end }}
+            - name: repo
+              emptyDir: {}
+            {{- with .Values.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
