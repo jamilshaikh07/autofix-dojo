@@ -520,6 +520,11 @@ def helm_upgrade_pr(
         typer.echo("No Helm charts found")
         return
 
+    # Debug: show all found releases
+    typer.echo(f"📊 Found {len(releases)} total Helm releases")
+    for r in releases:
+        typer.echo(f"   - {r.chart}: {r.current_version} → {r.latest_version or '?'} (priority: {r.priority}, outdated: {r.is_outdated})")
+
     # Filter by priority
     priority_levels = {"critical": 0, "major": 1, "minor": 2, "all": 3}
     min_priority = priority_levels.get(priority, 1)
