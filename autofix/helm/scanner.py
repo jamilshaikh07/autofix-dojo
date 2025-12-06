@@ -123,19 +123,30 @@ class HelmScanner:
                     capture_output=True,
                     text=True,
                     check=False,
+                    timeout=30,  # 30 second timeout per repo
                 )
                 if result.returncode != 0 and "already exists" not in result.stderr:
                     logger.debug(f"Failed to add repo {repo_name}: {result.stderr}")
+            except subprocess.TimeoutExpired:
+                logger.debug(f"Timeout adding repo {repo_name}")
             except Exception as e:
                 logger.debug(f"Failed to add repo {repo_name}: {e}")
 
-        # Update all repos
+        # Update all repos with timeout
         try:
-            subprocess.run(["helm", "repo", "update"], capture_output=True, check=False)
+            subprocess.run(
+                ["helm", "repo", "update"],
+                capture_output=True,
+                check=False,
+                timeout=120,  # 2 minute timeout
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("Helm repo update timed out after 120s")
         except Exception:
             pass
 
         self._repos_initialized = True
+        logger.info("Helm repositories initialized")
 
     def scan_terraform_dir(self, path: str | Path) -> list[HelmRelease]:
         """Scan a directory for Terraform helm_release resources."""
