@@ -607,18 +607,21 @@ def helm_upgrade_pr(
 
         # Use git to create branch and PR
         import subprocess
-        cwd = source_path.parent
 
-        # Find git root
-        git_root_result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, cwd=cwd
-        )
-        if git_root_result.returncode != 0:
-            typer.echo(f"   ❌ Not a git repository")
+        # Find git root - try from source path first, then from scan path
+        git_root = None
+        for try_path in [source_path.parent, Path(path)]:
+            git_root_result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, cwd=try_path
+            )
+            if git_root_result.returncode == 0:
+                git_root = Path(git_root_result.stdout.strip())
+                break
+
+        if not git_root:
+            typer.echo(f"   ❌ Not a git repository (tried {source_path.parent} and {path})")
             continue
-
-        git_root = Path(git_root_result.stdout.strip())
         relative_path = source_path.relative_to(git_root)
 
         # Create branch
