@@ -108,6 +108,34 @@ class HelmScanner:
 
     def __init__(self):
         self._repo_cache: dict[str, list[dict]] = {}
+        self._repos_initialized = False
+
+    def _init_repos(self) -> None:
+        """Initialize all known Helm repositories."""
+        if self._repos_initialized:
+            return
+
+        logger.info("Initializing Helm repositories...")
+        for repo_url, repo_name in self.KNOWN_REPOS.items():
+            try:
+                result = subprocess.run(
+                    ["helm", "repo", "add", repo_name, repo_url],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0 and "already exists" not in result.stderr:
+                    logger.debug(f"Failed to add repo {repo_name}: {result.stderr}")
+            except Exception as e:
+                logger.debug(f"Failed to add repo {repo_name}: {e}")
+
+        # Update all repos
+        try:
+            subprocess.run(["helm", "repo", "update"], capture_output=True, check=False)
+        except Exception:
+            pass
+
+        self._repos_initialized = True
 
     def scan_terraform_dir(self, path: str | Path) -> list[HelmRelease]:
         """Scan a directory for Terraform helm_release resources."""
@@ -177,6 +205,9 @@ class HelmScanner:
         """Fetch the latest version from Helm repository."""
         if not release.repository:
             return
+
+        # Initialize repos on first use
+        self._init_repos()
 
         repo_alias = self.KNOWN_REPOS.get(release.repository)
         if not repo_alias:
