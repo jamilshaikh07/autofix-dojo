@@ -770,7 +770,7 @@ Run `autofix-dojo helm-roadmap {release.chart} {old_version} {new_version}` for 
 """
 
         pr_result = subprocess.run(
-            ["gh", "pr", "create", "--title", pr_title, "--body", pr_body],
+            ["gh", "pr", "create", "--title", pr_title, "--body", pr_body, "--head", branch_name],
             cwd=git_root, capture_output=True, text=True
         )
 
