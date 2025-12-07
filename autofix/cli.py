@@ -549,10 +549,21 @@ def helm_upgrade_pr(
         "--step/--no-step",
         help="Upgrade one major version at a time (default: True for safe upgrades)",
     ),
+    batch: bool = typer.Option(
+        True,
+        "--batch/--no-batch",
+        help="Create one PR per priority level instead of per chart (default: True)",
+    ),
 ) -> None:
-    """Scan for outdated Helm charts and create PRs for upgrades."""
+    """Scan for outdated Helm charts and create PRs for upgrades.
+
+    By default, creates batched PRs - one per priority level (critical, major, minor).
+    Use --no-batch to create individual PRs per chart.
+    """
     import os
     import re
+    import subprocess
+    from collections import defaultdict
 
     # Validate Git configuration
     git_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GIT_TOKEN")
@@ -609,161 +620,178 @@ def helm_upgrade_pr(
         typer.echo("\n🏃 Dry run mode - no changes made")
         return
 
-    # Create PRs for each chart
-    typer.echo("\n🚀 Creating upgrade PRs...")
+    # Find git root first (needed for all operations)
+    first_release = candidates[0]
+    source_path = Path(first_release.source_file)
 
-    try:
-        config = Config.from_env()
-        git_client = GitClient(config)
-    except ValueError as e:
-        typer.echo(f"⚠️  Config warning: {e}")
-        typer.echo("Proceeding with environment variables...")
-        # Fallback: use git directly
-        git_client = None
+    git_root_result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, cwd=source_path.parent
+    )
+    if git_root_result.returncode != 0:
+        typer.echo("❌ Not a git repository")
+        raise typer.Exit(1)
 
-    success_count = 0
+    git_root = Path(git_root_result.stdout.strip())
+
+    # Process step mode for critical upgrades (version_gap > 1)
+    processed_releases = []
     for release in candidates:
-        typer.echo(f"\nProcessing {release.chart}...")
-
-        if not release.source_file:
-            typer.echo(f"   ⚠️  No source file found for {release.chart}")
-            continue
-
-        source_path = Path(release.source_file)
-        if not source_path.exists():
-            typer.echo(f"   ⚠️  Source file not found: {source_path}")
-            continue
-
-        # Read the source file
-        content = source_path.read_text()
-
         old_version = release.current_version
         new_version = release.latest_version
 
-        # Step mode: upgrade one major version at a time
         if step and release.version_gap > 1:
-            typer.echo(f"   📊 Step mode: Fetching all available versions...")
+            typer.echo(f"\n📊 {release.chart}: Step mode - fetching all versions...")
             all_versions = scanner.fetch_all_versions(release)
-
             if all_versions:
-                typer.echo(f"   Found {len(all_versions)} versions available")
                 new_version = _get_next_major_version(old_version, release.latest_version, all_versions)
                 if new_version != release.latest_version:
-                    typer.echo(f"   🔄 Step upgrade: {old_version} → {new_version} (next step toward {release.latest_version})")
-                else:
-                    typer.echo(f"   ℹ️  No intermediate versions found, upgrading to latest")
-            else:
-                typer.echo(f"   ⚠️  Could not fetch all versions, upgrading to latest")
+                    typer.echo(f"   🔄 Step: {old_version} → {new_version} (toward {release.latest_version})")
 
-        # Create upgrade branch
-        branch_name = f"autofix/helm-upgrade-{release.chart}-{new_version}".replace(".", "-")
+        processed_releases.append((release, old_version, new_version))
+
+    if batch:
+        # Batch mode: Group by priority and create one PR per priority
+        _create_batched_prs(processed_releases, git_root, scanner, step)
+    else:
+        # Individual mode: Create one PR per chart
+        _create_individual_prs(processed_releases, git_root, scanner, step)
+
+
+def _create_batched_prs(
+    processed_releases: list,
+    git_root: Path,
+    scanner,
+    step: bool,
+) -> None:
+    """Create one PR per priority level containing all upgrades of that priority."""
+    import re
+    import subprocess
+    from collections import defaultdict
+
+    # Group releases by priority
+    by_priority: dict[str, list] = defaultdict(list)
+    for release, old_version, new_version in processed_releases:
+        by_priority[release.priority].append((release, old_version, new_version))
+
+    typer.echo("\n🚀 Creating batched upgrade PRs...")
+
+    success_count = 0
+    priority_order = ["critical", "major", "minor"]
+
+    for priority_level in priority_order:
+        if priority_level not in by_priority:
+            continue
+
+        releases_in_batch = by_priority[priority_level]
+        if not releases_in_batch:
+            continue
+
+        typer.echo(f"\n📦 Processing {priority_level.upper()} upgrades ({len(releases_in_batch)} charts)...")
+
+        # Ensure we're on the main branch
+        subprocess.run(["git", "checkout", "master"], cwd=git_root, capture_output=True)
+        subprocess.run(["git", "pull", "origin", "master"], cwd=git_root, capture_output=True)
+
+        # Create a branch name based on priority
+        branch_name = f"autofix/helm-{priority_level}-upgrades"
         typer.echo(f"   Creating branch: {branch_name}")
 
-        # Pattern for version = "x.y.z" (Terraform)
-        tf_pattern = rf'(version\s*=\s*["\'])({re.escape(old_version)})(["\'])'
-        tf_replacement = rf'\g<1>{new_version}\g<3>'
+        # Delete branch if it exists locally
+        subprocess.run(["git", "branch", "-D", branch_name], cwd=git_root, capture_output=True)
 
-        # Pattern for targetRevision: vx.y.z or x.y.z (ArgoCD)
-        argocd_pattern = rf'(targetRevision:\s*["\']?v?)({re.escape(old_version)})(["\']?)'
-        argocd_replacement = rf'\g<1>{new_version}\g<3>'
-
-        new_content = re.sub(tf_pattern, tf_replacement, content)
-        if new_content == content:
-            # Try ArgoCD pattern
-            new_content = re.sub(argocd_pattern, argocd_replacement, content)
-
-        if new_content == content:
-            typer.echo(f"   ⚠️  Could not find version to update in {source_path}")
-            continue
-
-        # Write the updated file
-        typer.echo(f"   Updating {source_path.name}...")
-
-        # Use git to create branch and PR
-        import subprocess
-
-        # Find git root - traverse up from source path to find .git directory
-        git_root = None
-
-        # First try using git rev-parse from the source file's directory
-        git_root_result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, cwd=source_path.parent
-        )
-        if git_root_result.returncode == 0:
-            git_root = Path(git_root_result.stdout.strip())
-        else:
-            # Fallback: traverse up from source path looking for .git
-            current = source_path.parent
-            while current != current.parent:
-                if (current / ".git").exists():
-                    git_root = current
-                    break
-                current = current.parent
-
-        if not git_root:
-            typer.echo(f"   ❌ Not a git repository (source: {source_path.parent})")
-            continue
-
-        # Make source_path absolute if it isn't
-        if not source_path.is_absolute():
-            source_path = git_root / source_path
-
-        relative_path = source_path.relative_to(git_root)
-
-        # Create branch
+        # Create new branch
         subprocess.run(["git", "checkout", "-b", branch_name], cwd=git_root, capture_output=True)
 
-        # Write changes
-        source_path.write_text(new_content)
+        # Track changes for PR description
+        changes = []
+        files_changed = []
 
-        # Commit
-        subprocess.run(["git", "add", str(relative_path)], cwd=git_root, capture_output=True)
-        commit_msg = f"chore(helm): upgrade {release.chart} from {old_version} to {new_version}"
+        for release, old_version, new_version in releases_in_batch:
+            source_path = Path(release.source_file)
+            if not source_path.is_absolute():
+                source_path = git_root / source_path
+
+            if not source_path.exists():
+                typer.echo(f"   ⚠️  Skipping {release.chart}: file not found")
+                continue
+
+            content = source_path.read_text()
+
+            # Pattern for version = "x.y.z" (Terraform)
+            tf_pattern = rf'(version\s*=\s*["\'])({re.escape(old_version)})(["\'])'
+            tf_replacement = rf'\g<1>{new_version}\g<3>'
+
+            # Pattern for targetRevision: vx.y.z or x.y.z (ArgoCD)
+            argocd_pattern = rf'(targetRevision:\s*["\']?v?)({re.escape(old_version)})(["\']?)'
+            argocd_replacement = rf'\g<1>{new_version}\g<3>'
+
+            new_content = re.sub(tf_pattern, tf_replacement, content)
+            if new_content == content:
+                new_content = re.sub(argocd_pattern, argocd_replacement, content)
+
+            if new_content == content:
+                typer.echo(f"   ⚠️  Skipping {release.chart}: version pattern not found")
+                continue
+
+            # Write the changes
+            source_path.write_text(new_content)
+
+            relative_path = source_path.relative_to(git_root)
+            files_changed.append(str(relative_path))
+
+            # Track for PR description
+            is_step = step and new_version != release.latest_version
+            if is_step:
+                changes.append(f"- **{release.chart}**: {old_version} → {new_version} (step toward {release.latest_version})")
+            else:
+                changes.append(f"- **{release.chart}**: {old_version} → {new_version}")
+
+            typer.echo(f"   ✓ {release.chart}: {old_version} → {new_version}")
+
+        if not changes:
+            typer.echo(f"   ⚠️  No changes to commit for {priority_level}")
+            subprocess.run(["git", "checkout", "master"], cwd=git_root, capture_output=True)
+            continue
+
+        # Stage and commit all changes
+        for f in files_changed:
+            subprocess.run(["git", "add", f], cwd=git_root, capture_output=True)
+
+        commit_msg = f"chore(helm): {priority_level} upgrades - {len(changes)} charts"
         subprocess.run(["git", "commit", "-m", commit_msg], cwd=git_root, capture_output=True)
 
         # Push
         push_result = subprocess.run(
-            ["git", "push", "-u", "origin", branch_name],
+            ["git", "push", "-u", "origin", branch_name, "--force"],
             cwd=git_root, capture_output=True, text=True
         )
 
         if push_result.returncode != 0:
             typer.echo(f"   ❌ Failed to push: {push_result.stderr}")
-            # Restore main branch
-            subprocess.run(["git", "checkout", "-"], cwd=git_root, capture_output=True)
-            subprocess.run(["git", "branch", "-D", branch_name], cwd=git_root, capture_output=True)
+            subprocess.run(["git", "checkout", "master"], cwd=git_root, capture_output=True)
             continue
 
-        # Create PR using gh CLI
-        is_step_upgrade = step and new_version != release.latest_version
-        pr_title = f"chore(helm): upgrade {release.chart} to {new_version}"
-        if is_step_upgrade:
-            pr_title += f" (step 1 toward {release.latest_version})"
+        # Create PR
+        emoji_map = {"critical": "🔴", "major": "🟠", "minor": "🟡"}
+        emoji = emoji_map.get(priority_level, "📦")
 
-        step_info = ""
-        if is_step_upgrade:
-            step_info = f"""
-### Step Upgrade Info
-This is a **step-by-step upgrade** for safety.
-- **Current:** {old_version}
-- **This PR:** {new_version}
-- **Final Target:** {release.latest_version}
+        pr_title = f"{emoji} chore(helm): {priority_level} upgrades ({len(changes)} charts)"
 
-After merging this PR, autofix-dojo will create the next step PR automatically.
-"""
+        pr_body = f"""## {priority_level.title()} Helm Chart Upgrades
 
-        pr_body = f"""## Helm Chart Upgrade
+This PR contains **{len(changes)} {priority_level} upgrade(s)**.
 
-**Chart:** {release.chart}
-**Current Version:** {old_version}
-**New Version:** {new_version}
-{step_info}
 ### Changes
-- Updated {relative_path}
+{chr(10).join(changes)}
 
-### Upgrade Notes
-Run `autofix-dojo helm-roadmap {release.chart} {old_version} {new_version}` for detailed upgrade path.
+### Files Modified
+{chr(10).join([f"- `{f}`" for f in files_changed])}
+
+### Upgrade Priority
+- 🔴 **Critical**: 3+ major versions behind
+- 🟠 **Major**: 1-2 major versions behind
+- 🟡 **Minor**: Patch/minor version updates
 
 ---
 🤖 Generated by autofix-dojo
@@ -775,19 +803,136 @@ Run `autofix-dojo helm-roadmap {release.chart} {old_version} {new_version}` for 
         )
 
         # Return to main branch
-        subprocess.run(["git", "checkout", "-"], cwd=git_root, capture_output=True)
+        subprocess.run(["git", "checkout", "master"], cwd=git_root, capture_output=True)
 
         if pr_result.returncode == 0:
             pr_url = pr_result.stdout.strip()
             typer.echo(f"   ✅ PR created: {pr_url}")
             success_count += 1
         else:
-            typer.echo(f"   ⚠️  Push succeeded but PR creation failed: {pr_result.stderr}")
+            typer.echo(f"   ⚠️  PR creation failed: {pr_result.stderr}")
             typer.echo(f"   Branch '{branch_name}' is ready for manual PR creation")
-            success_count += 1  # Still count as partial success
 
     typer.echo("\n" + "=" * 50)
-    typer.echo(f"📊 Created {success_count}/{len(candidates)} upgrade PRs")
+    typer.echo(f"📊 Created {success_count} batched PR(s)")
+
+
+def _create_individual_prs(
+    processed_releases: list,
+    git_root: Path,
+    scanner,
+    step: bool,
+) -> None:
+    """Create one PR per chart (original behavior)."""
+    import re
+    import subprocess
+
+    typer.echo("\n🚀 Creating individual upgrade PRs...")
+
+    success_count = 0
+    for release, old_version, new_version in processed_releases:
+        typer.echo(f"\nProcessing {release.chart}...")
+
+        source_path = Path(release.source_file)
+        if not source_path.is_absolute():
+            source_path = git_root / source_path
+
+        if not source_path.exists():
+            typer.echo(f"   ⚠️  Source file not found: {source_path}")
+            continue
+
+        content = source_path.read_text()
+
+        # Pattern for version = "x.y.z" (Terraform)
+        tf_pattern = rf'(version\s*=\s*["\'])({re.escape(old_version)})(["\'])'
+        tf_replacement = rf'\g<1>{new_version}\g<3>'
+
+        # Pattern for targetRevision: vx.y.z or x.y.z (ArgoCD)
+        argocd_pattern = rf'(targetRevision:\s*["\']?v?)({re.escape(old_version)})(["\']?)'
+        argocd_replacement = rf'\g<1>{new_version}\g<3>'
+
+        new_content = re.sub(tf_pattern, tf_replacement, content)
+        if new_content == content:
+            new_content = re.sub(argocd_pattern, argocd_replacement, content)
+
+        if new_content == content:
+            typer.echo(f"   ⚠️  Could not find version to update")
+            continue
+
+        # Ensure we're on main branch
+        subprocess.run(["git", "checkout", "master"], cwd=git_root, capture_output=True)
+        subprocess.run(["git", "pull", "origin", "master"], cwd=git_root, capture_output=True)
+
+        branch_name = f"autofix/helm-upgrade-{release.chart}-{new_version}".replace(".", "-")
+        typer.echo(f"   Creating branch: {branch_name}")
+
+        # Delete if exists
+        subprocess.run(["git", "branch", "-D", branch_name], cwd=git_root, capture_output=True)
+        subprocess.run(["git", "checkout", "-b", branch_name], cwd=git_root, capture_output=True)
+
+        # Write and commit
+        source_path.write_text(new_content)
+        relative_path = source_path.relative_to(git_root)
+        subprocess.run(["git", "add", str(relative_path)], cwd=git_root, capture_output=True)
+
+        commit_msg = f"chore(helm): upgrade {release.chart} from {old_version} to {new_version}"
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=git_root, capture_output=True)
+
+        # Push
+        push_result = subprocess.run(
+            ["git", "push", "-u", "origin", branch_name, "--force"],
+            cwd=git_root, capture_output=True, text=True
+        )
+
+        if push_result.returncode != 0:
+            typer.echo(f"   ❌ Failed to push: {push_result.stderr}")
+            subprocess.run(["git", "checkout", "master"], cwd=git_root, capture_output=True)
+            continue
+
+        # Create PR
+        is_step_upgrade = step and new_version != release.latest_version
+        pr_title = f"chore(helm): upgrade {release.chart} to {new_version}"
+        if is_step_upgrade:
+            pr_title += f" (step toward {release.latest_version})"
+
+        step_info = ""
+        if is_step_upgrade:
+            step_info = f"""
+### Step Upgrade
+- Current: {old_version}
+- This PR: {new_version}
+- Target: {release.latest_version}
+"""
+
+        pr_body = f"""## Helm Chart Upgrade
+
+**Chart:** {release.chart}
+**Priority:** {release.priority_emoji} {release.priority}
+**Version:** {old_version} → {new_version}
+{step_info}
+### Changes
+- Updated `{relative_path}`
+
+---
+🤖 Generated by autofix-dojo
+"""
+
+        pr_result = subprocess.run(
+            ["gh", "pr", "create", "--title", pr_title, "--body", pr_body, "--head", branch_name],
+            cwd=git_root, capture_output=True, text=True
+        )
+
+        subprocess.run(["git", "checkout", "master"], cwd=git_root, capture_output=True)
+
+        if pr_result.returncode == 0:
+            pr_url = pr_result.stdout.strip()
+            typer.echo(f"   ✅ PR created: {pr_url}")
+            success_count += 1
+        else:
+            typer.echo(f"   ⚠️  PR creation failed: {pr_result.stderr}")
+
+    typer.echo("\n" + "=" * 50)
+    typer.echo(f"📊 Created {success_count}/{len(processed_releases)} upgrade PRs")
 
 
 @app.command()
