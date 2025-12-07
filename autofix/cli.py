@@ -622,6 +622,11 @@ def helm_upgrade_pr(
         if not git_root:
             typer.echo(f"   ❌ Not a git repository (tried {source_path.parent} and {path})")
             continue
+
+        # Make source_path absolute if it isn't
+        if not source_path.is_absolute():
+            source_path = git_root / source_path
+
         relative_path = source_path.relative_to(git_root)
 
         # Create branch
