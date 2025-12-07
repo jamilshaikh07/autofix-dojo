@@ -227,13 +227,35 @@ python -m autofix.cli helm-upgrade-pr \
 ### Manual Job Triggering (Kubernetes)
 
 ```bash
-# Trigger a job manually in Kubernetes
+# Using the CLI (from inside the cluster or with kubectl exec)
 python -m autofix.cli trigger helm-upgrade-pr -n autofix-dojo
 python -m autofix.cli trigger helm-scan -n autofix-dojo
 python -m autofix.cli trigger vuln-scan -n autofix-dojo
 
 # Wait for job completion
 python -m autofix.cli trigger helm-upgrade-pr -n autofix-dojo --wait
+```
+
+### Using kubectl Directly
+
+```bash
+# Trigger helm-upgrade-pr job from CronJob
+kubectl create job --from=cronjob/autofix-dojo-helm-upgrade-pr helm-upgrade-pr-manual-$(date +%s) -n autofix-dojo
+
+# Trigger helm-scan job from CronJob
+kubectl create job --from=cronjob/autofix-dojo-helm-scan helm-scan-manual-$(date +%s) -n autofix-dojo
+
+# Trigger vuln-scan job from CronJob
+kubectl create job --from=cronjob/autofix-dojo-vuln-scan vuln-scan-manual-$(date +%s) -n autofix-dojo
+
+# Watch job progress
+kubectl get jobs -n autofix-dojo -w
+
+# View logs of a running/completed job
+kubectl logs job/helm-upgrade-pr-manual-1234567890 -n autofix-dojo --follow
+
+# Delete completed jobs
+kubectl delete jobs -n autofix-dojo --field-selector status.successful=1
 ```
 
 ### Web Dashboard
@@ -443,18 +465,6 @@ Security automation shouldn't be locked behind enterprise paywalls. By open-sour
 - Build a community around autonomous InfraOps
 - Learn from real-world usage patterns
 - Accelerate the path to fully autonomous infrastructure
-
-## Screenshots
-
-<!-- TODO: Add screenshots -->
-![Dashboard](docs/images/dashboard-placeholder.png)
-*DefectDojo findings list*
-
-![PR Example](docs/images/pr-placeholder.png)
-*Auto-generated pull request*
-
-![SLO Report](docs/images/slo-placeholder.png)
-*SLO tracking output*
 
 ## Contributing
 
