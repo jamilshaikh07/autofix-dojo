@@ -1,22 +1,44 @@
 # autofix-dojo
 
-> Autonomous vulnerability remediation for Kubernetes. Fix CVEs while you sleep.
+> Autonomous vulnerability remediation & Helm chart upgrade automation for Kubernetes. Fix CVEs and keep your Helm charts up-to-date while you sleep.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![DefectDojo](https://img.shields.io/badge/DefectDojo-Compatible-green.svg)](https://www.defectdojo.com/)
+[![Helm](https://img.shields.io/badge/Helm-Charts-blue.svg)](https://helm.sh/)
 
-**autofix-dojo** connects to your DefectDojo instance, identifies vulnerable container images, bumps them to patched versions, and opens pull requests automatically. It's your first step toward autonomous InfraOps.
+**autofix-dojo** is a GitOps-native automation tool that:
+- Connects to DefectDojo to identify vulnerable container images and creates PRs to fix them
+- Scans your Helm charts for outdated versions and creates step-by-step upgrade PRs (like Dependabot for Helm!)
+- Provides a web dashboard for manual job triggering and monitoring
+- Exposes Prometheus metrics for Grafana dashboards
 
 ## Features
 
+### Vulnerability Remediation
 - **DefectDojo Integration** - Fetch Critical/High findings via REST API
 - **Smart Image Versioning** - Suggests safe patch-level updates using semver logic
 - **Kubernetes-Native** - Updates Deployments, Helm values, and YAML manifests
 - **Git Automation** - Creates branches, commits, and PRs via `gh`/`glab` CLI
 - **SLO Tracking** - Measures auto-fix success rate over time
+
+### Helm Chart Upgrades (Dependabot for Helm)
+- **ArgoCD App Scanning** - Scans ArgoCD Application manifests for Helm charts
+- **Version Detection** - Compares current vs latest versions from Helm repos
+- **Step-by-Step Upgrades** - Creates sequential PRs for major version jumps (e.g., v1 → v2 → v3)
+- **Priority-Based Batching** - Groups upgrades by priority (critical, major, minor)
+- **Safe Automation** - One PR at a time to prevent breaking changes
+
+### Web Dashboard & Observability
+- **Web UI** - Real-time dashboard with quick action buttons
+- **Manual Job Triggering** - Trigger scans and upgrades on-demand
+- **Prometheus Metrics** - `/metrics` endpoint for Grafana dashboards
+- **CronJob Status** - View job history and logs
+
+### General
 - **Dry-Run Mode** - Preview changes without modifying anything
 - **GitHub & GitLab Support** - Works with both platforms out of the box
+- **Kubernetes CronJob Mode** - Run as scheduled jobs in your cluster
 
 ## Architecture
 
@@ -35,12 +57,21 @@
 
 ## How It Works
 
+### Vulnerability Remediation Flow
 1. **Fetch** - Queries DefectDojo API for open Critical/High vulnerabilities
 2. **Analyze** - Groups findings by container image and determines fix candidates
 3. **Suggest** - Uses known-safe mappings or semver patch bumps to suggest updates
 4. **Update** - Modifies Kubernetes manifests and Helm values in your GitOps repo
 5. **PR** - Creates a pull request with detailed change summary
 6. **Track** - Records SLO metrics for compliance reporting
+
+### Helm Chart Upgrade Flow
+1. **Scan** - Parses ArgoCD Application manifests for Helm chart references
+2. **Compare** - Queries Helm repos for latest versions
+3. **Prioritize** - Categorizes updates as critical, major, or minor
+4. **Step** - For major jumps, creates sequential PRs (v1→v2, then v2→v3)
+5. **PR** - Creates batched PRs grouped by priority level
+6. **Wait** - Monitors for PR merge before creating next upgrade PR
 
 ## Working Demo
 
@@ -150,6 +181,8 @@ print(f'API_KEY={token.key}')
 
 ## CLI Commands
 
+### Vulnerability Scanning (DefectDojo)
+
 ```bash
 # Scan and auto-fix vulnerabilities
 python -m autofix.cli scan-and-fix
@@ -165,6 +198,52 @@ python -m autofix.cli show-slo
 
 # Smoke test a deployment
 python -m autofix.cli smoke-test my-deployment -n my-namespace
+```
+
+### Helm Chart Upgrades
+
+```bash
+# Scan for outdated Helm charts
+python -m autofix.cli helm-scan \
+  --repo-owner jamilshaikh07 \
+  --repo-name talos-proxmox-gitops \
+  --scan-path gitops/apps
+
+# Create PRs for outdated charts (batched by priority)
+python -m autofix.cli helm-upgrade-pr \
+  --repo-owner jamilshaikh07 \
+  --repo-name talos-proxmox-gitops \
+  --scan-path gitops/apps \
+  --priority minor  # Creates PRs for minor, major, and critical
+
+# Dry run (no PRs created)
+python -m autofix.cli helm-upgrade-pr \
+  --repo-owner jamilshaikh07 \
+  --repo-name talos-proxmox-gitops \
+  --scan-path gitops/apps \
+  --dry-run
+```
+
+### Manual Job Triggering (Kubernetes)
+
+```bash
+# Trigger a job manually in Kubernetes
+python -m autofix.cli trigger helm-upgrade-pr -n autofix-dojo
+python -m autofix.cli trigger helm-scan -n autofix-dojo
+python -m autofix.cli trigger vuln-scan -n autofix-dojo
+
+# Wait for job completion
+python -m autofix.cli trigger helm-upgrade-pr -n autofix-dojo --wait
+```
+
+### Web Dashboard
+
+```bash
+# Start the web dashboard locally
+python -m autofix.cli web --host 0.0.0.0 --port 8080
+
+# With auto-reload for development
+python -m autofix.cli web --reload
 ```
 
 ## Docker
@@ -194,8 +273,22 @@ autofix-dojo/
 │   ├── dojo_client.py   # DefectDojo REST API client
 │   ├── fixer.py         # Version parsing and fix suggestions
 │   ├── git_client.py    # Git operations and PR creation
+│   ├── helm_scanner.py  # Helm chart version scanning
 │   ├── models.py        # Dataclasses (Finding, FixSuggestion, etc.)
-│   └── slo_tracker.py   # JSON-based SLO tracking
+│   ├── slo_tracker.py   # JSON-based SLO tracking
+│   └── web/
+│       └── app.py       # FastAPI web dashboard
+├── deploy/
+│   ├── helm-chart/      # Helm chart for Kubernetes deployment
+│   │   ├── templates/
+│   │   │   ├── deployment-web.yaml
+│   │   │   ├── service-web.yaml
+│   │   │   ├── ingress-web.yaml
+│   │   │   ├── cronjob-*.yaml
+│   │   │   └── servicemonitor.yaml
+│   │   └── values.yaml
+│   └── grafana/
+│       └── dashboard.json  # Grafana dashboard
 ├── scripts/
 │   └── seed_dojo.py     # Seed DefectDojo with test data
 ├── tests/
@@ -230,18 +323,117 @@ SLO % = (auto_fixed_findings / total_findings) * 100
 
 This measures what percentage of HIGH/CRITICAL vulnerabilities were automatically remediated via PRs. Use `show-slo` to view historical trends.
 
+## Kubernetes Deployment
+
+### Using Helm
+
+```bash
+# Add the Helm repository (if published)
+helm repo add autofix-dojo https://jamilshaikh07.github.io/autofix-dojo
+
+# Install with custom values
+helm install autofix-dojo autofix-dojo/autofix-dojo \
+  --namespace autofix-dojo \
+  --create-namespace \
+  --set web.enabled=true \
+  --set web.ingress.enabled=true \
+  --set web.ingress.hosts[0].host=autofix.example.com \
+  --set metrics.enabled=true \
+  --set metrics.serviceMonitor.enabled=true
+```
+
+### Using ArgoCD
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: autofix-dojo
+  namespace: argocd
+spec:
+  destination:
+    namespace: autofix-dojo
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    repoURL: https://github.com/jamilshaikh07/autofix-dojo
+    path: deploy/helm-chart
+    targetRevision: master
+    helm:
+      values: |
+        image:
+          repository: ghcr.io/jamilshaikh07/autofix-dojo
+          tag: "master"
+        web:
+          enabled: true
+          ingress:
+            enabled: true
+            className: "nginx"
+            hosts:
+              - host: autofix.example.com
+                paths:
+                  - path: /
+                    pathType: Prefix
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+        helm:
+          enabled: true
+          autoPR:
+            enabled: true
+            schedule: "0 0 * * 1"  # Weekly
+            repoOwner: "your-org"
+            repoName: "your-gitops-repo"
+            scanPath: "gitops/apps"
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+## Web Dashboard
+
+The web dashboard provides:
+
+- **Quick Actions** - One-click buttons to trigger jobs
+- **CronJob Status** - View all scheduled jobs and their next run time
+- **Job History** - List of recent job runs with status
+- **Log Viewer** - Real-time logs from running jobs
+- **Health Check** - `/api/health` endpoint for liveness/readiness probes
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/` | Web dashboard UI |
+| `/api/health` | Health check (JSON) |
+| `/api/cronjobs` | List CronJobs |
+| `/api/jobs` | List Jobs |
+| `/api/trigger` | Trigger a job (POST) |
+| `/api/logs/{pod}` | Get pod logs |
+| `/metrics` | Prometheus metrics |
+
+### Prometheus Metrics
+
+The `/metrics` endpoint exposes:
+
+- `autofix_jobs_triggered_total` - Counter of triggered jobs by type
+- `autofix_helm_charts_outdated` - Gauge of outdated charts by priority
+- `autofix_helm_scan_duration_seconds` - Histogram of scan duration
+
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for the full vision.
-
-| Version | Milestone |
-|---------|-----------|
-| v0.1 | MVP - DefectDojo + GitHub PRs |
-| v0.2 | Improved fixer logic, registry lookups |
-| v0.3 | GitLab MR support |
-| v0.4 | ArgoCD sync integration |
-| v0.5 | Kubernetes CronJob mode |
-| v1.0 | InfraOps Autonomous Engine |
+| Version | Milestone | Status |
+|---------|-----------|--------|
+| v0.1 | MVP - DefectDojo + GitHub PRs | Done |
+| v0.2 | Improved fixer logic, registry lookups | Done |
+| v0.3 | GitLab MR support | Done |
+| v0.4 | ArgoCD sync integration | Done |
+| v0.5 | Kubernetes CronJob mode | Done |
+| v0.6 | Helm chart upgrade automation | Done |
+| v0.7 | Web dashboard + Prometheus metrics | Done |
+| v1.0 | InfraOps Autonomous Engine | In Progress |
 
 ## Why Open Source?
 
