@@ -27,12 +27,15 @@ rules:
       - replicasets
     verbs: ["get", "list", "watch"]
 
-  # CronJobs
+  # CronJobs and Jobs - need create for triggering jobs from web UI
   - apiGroups: ["batch"]
     resources:
       - cronjobs
-      - jobs
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+    verbs: ["get", "list", "watch", "create", "delete"]
 
   # Custom Resource - AutofixPolicy
   - apiGroups: ["autofix.dojo.io"]

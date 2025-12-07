@@ -288,22 +288,55 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>autofix-dojo Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'gray-750': '#2d3748',
+                    }
+                }
+            }
+        }
+    </script>
     <style>
         .loading { opacity: 0.5; pointer-events: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .spinner { animation: spin 1s linear infinite; }
+        @keyframes pulse-border {
+            0%, 100% { border-color: rgba(59, 130, 246, 0.5); }
+            50% { border-color: rgba(59, 130, 246, 1); }
+        }
+        .pulse-border { animation: pulse-border 2s ease-in-out infinite; }
+        /* Light mode overrides */
+        .light { background-color: #f3f4f6 !important; color: #1f2937 !important; }
+        .light .bg-gray-800 { background-color: #ffffff !important; }
+        .light .bg-gray-900 { background-color: #f3f4f6 !important; }
+        .light .bg-gray-700 { background-color: #e5e7eb !important; }
+        .light .text-gray-100 { color: #1f2937 !important; }
+        .light .text-gray-400 { color: #6b7280 !important; }
+        .light .text-gray-300 { color: #4b5563 !important; }
+        .light .border-gray-700 { border-color: #e5e7eb !important; }
+        .light .hover\\:bg-gray-750:hover { background-color: #f9fafb !important; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
+<body class="bg-gray-900 text-gray-100 min-h-screen transition-colors duration-300" id="app-body">
     <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
         <div class="flex items-center justify-between max-w-7xl mx-auto">
             <div class="flex items-center space-x-3">
                 <span class="text-2xl">🥋</span>
                 <h1 class="text-xl font-bold">autofix-dojo</h1>
             </div>
-            <div class="text-sm text-gray-400">
-                Autonomous Vulnerability & Helm Chart Fixer
+            <div class="flex items-center space-x-4">
+                <span class="text-sm text-gray-400 hidden md:block">
+                    Autonomous Vulnerability & Helm Chart Fixer
+                </span>
+                <!-- Theme Toggle -->
+                <button onclick="toggleTheme()" id="themeToggle"
+                    class="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition" title="Toggle theme">
+                    <span id="themeIcon">🌙</span>
+                </button>
             </div>
         </div>
     </nav>
@@ -368,10 +401,46 @@ HTML_TEMPLATE = """
             <div class="bg-gray-800 rounded-lg w-full max-w-4xl max-h-[80vh] m-4 flex flex-col">
                 <div class="flex items-center justify-between p-4 border-b border-gray-700">
                     <h3 id="logsTitle" class="font-semibold">Job Logs</h3>
-                    <button onclick="closeLogsModal()" class="text-gray-400 hover:text-white">✕</button>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="downloadLogsMarkdown()" class="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center space-x-1">
+                            <span>📥</span><span>Download .md</span>
+                        </button>
+                        <button onclick="copyLogs()" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm flex items-center space-x-1">
+                            <span>📋</span><span>Copy</span>
+                        </button>
+                        <button onclick="closeLogsModal()" class="text-gray-400 hover:text-white text-xl px-2">✕</button>
+                    </div>
                 </div>
-                <div id="logsContent" class="flex-1 overflow-auto p-4">
+                <div id="logsContent" class="flex-1 overflow-auto p-4 bg-gray-900">
                     <pre class="text-sm text-gray-300 whitespace-pre-wrap font-mono"></pre>
+                </div>
+                <div id="logsStatus" class="p-3 border-t border-gray-700 text-sm text-gray-400 flex items-center justify-between">
+                    <span id="logsJobStatus">-</span>
+                    <span id="logsRefreshBtn" class="hidden">
+                        <button onclick="refreshCurrentLogs()" class="text-blue-400 hover:text-blue-300">🔄 Refresh</button>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Triggered Job Panel (slides in after trigger) -->
+        <div id="triggeredJobPanel" class="fixed bottom-0 left-0 right-0 bg-gray-800 border-t-2 border-blue-500 transform translate-y-full transition-transform duration-300 z-40">
+            <div class="max-w-7xl mx-auto p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xl" id="triggeredJobIcon">🔄</span>
+                        <div>
+                            <div class="font-semibold" id="triggeredJobName">-</div>
+                            <div class="text-sm text-gray-400" id="triggeredJobStatus">Starting...</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="downloadTriggeredLogsMarkdown()" class="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm">📥 .md</button>
+                        <button onclick="closeTriggeredJobPanel()" class="text-gray-400 hover:text-white text-xl px-2">✕</button>
+                    </div>
+                </div>
+                <div id="triggeredJobLogs" class="bg-gray-900 rounded p-3 max-h-64 overflow-auto">
+                    <pre class="text-sm text-gray-300 whitespace-pre-wrap font-mono">Waiting for logs...</pre>
                 </div>
             </div>
         </div>
@@ -379,6 +448,37 @@ HTML_TEMPLATE = """
 
     <script>
         const namespace = 'autofix-dojo';
+        let currentJobName = '';
+        let currentLogs = '';
+        let triggeredJobName = '';
+        let triggeredLogs = '';
+        let logPollingInterval = null;
+
+        // Theme management
+        function getTheme() {
+            return localStorage.getItem('theme') || 'dark';
+        }
+
+        function setTheme(theme) {
+            localStorage.setItem('theme', theme);
+            const body = document.getElementById('app-body');
+            const icon = document.getElementById('themeIcon');
+            if (theme === 'light') {
+                body.classList.add('light');
+                icon.textContent = '☀️';
+            } else {
+                body.classList.remove('light');
+                icon.textContent = '🌙';
+            }
+        }
+
+        function toggleTheme() {
+            const current = getTheme();
+            setTheme(current === 'dark' ? 'light' : 'dark');
+        }
+
+        // Initialize theme
+        setTheme(getTheme());
 
         async function loadCronJobs() {
             const container = document.getElementById('cronjobs');
@@ -476,8 +576,6 @@ HTML_TEMPLATE = """
         }
 
         async function triggerJob(jobType) {
-            if (!confirm(`Trigger ${jobType} job?`)) return;
-
             try {
                 const res = await fetch('/api/trigger', {
                     method: 'POST',
@@ -488,7 +586,9 @@ HTML_TEMPLATE = """
                 const data = await res.json();
 
                 if (res.ok) {
-                    alert(`Job created: ${data.job_name}`);
+                    // Show triggered job panel with live logs
+                    triggeredJobName = data.job_name;
+                    showTriggeredJobPanel(data.job_name, jobType);
                     loadJobs();
                 } else {
                     alert(`Error: ${data.detail}`);
@@ -498,22 +598,111 @@ HTML_TEMPLATE = """
             }
         }
 
+        function showTriggeredJobPanel(jobName, jobType) {
+            const panel = document.getElementById('triggeredJobPanel');
+            document.getElementById('triggeredJobName').textContent = jobName;
+            document.getElementById('triggeredJobStatus').textContent = 'Starting...';
+            document.getElementById('triggeredJobIcon').textContent = '🔄';
+            document.getElementById('triggeredJobLogs').querySelector('pre').textContent = 'Waiting for pod to start...';
+
+            panel.classList.remove('translate-y-full');
+
+            // Start polling for logs
+            if (logPollingInterval) clearInterval(logPollingInterval);
+            logPollingInterval = setInterval(() => pollTriggeredJobLogs(jobName), 3000);
+
+            // Initial fetch after short delay
+            setTimeout(() => pollTriggeredJobLogs(jobName), 2000);
+        }
+
+        async function pollTriggeredJobLogs(jobName) {
+            try {
+                // Check job status
+                const statusRes = await fetch(`/api/jobs?namespace=${namespace}&limit=20`);
+                const statusData = await statusRes.json();
+                const job = statusData.jobs.find(j => j.name === jobName);
+
+                if (job) {
+                    document.getElementById('triggeredJobStatus').textContent = job.status;
+                    if (job.status === 'Completed') {
+                        document.getElementById('triggeredJobIcon').textContent = '✅';
+                        clearInterval(logPollingInterval);
+                    } else if (job.status === 'Failed') {
+                        document.getElementById('triggeredJobIcon').textContent = '❌';
+                        clearInterval(logPollingInterval);
+                    }
+                }
+
+                // Fetch logs
+                const logsRes = await fetch(`/api/job/${jobName}/logs?namespace=${namespace}&tail=200`);
+                const logsData = await logsRes.json();
+
+                if (logsData.logs) {
+                    triggeredLogs = logsData.logs;
+                    const logsContainer = document.getElementById('triggeredJobLogs').querySelector('pre');
+                    logsContainer.textContent = logsData.logs;
+                    // Auto-scroll to bottom
+                    document.getElementById('triggeredJobLogs').scrollTop = document.getElementById('triggeredJobLogs').scrollHeight;
+                }
+            } catch (err) {
+                console.error('Error polling logs:', err);
+            }
+        }
+
+        function closeTriggeredJobPanel() {
+            const panel = document.getElementById('triggeredJobPanel');
+            panel.classList.add('translate-y-full');
+            if (logPollingInterval) {
+                clearInterval(logPollingInterval);
+                logPollingInterval = null;
+            }
+        }
+
+        function downloadTriggeredLogsMarkdown() {
+            if (!triggeredJobName || !triggeredLogs) {
+                alert('No logs available');
+                return;
+            }
+            downloadMarkdown(triggeredJobName, triggeredLogs);
+        }
+
         async function viewLogs(jobName) {
+            currentJobName = jobName;
             const modal = document.getElementById('logsModal');
             const title = document.getElementById('logsTitle');
             const content = document.getElementById('logsContent').querySelector('pre');
+            const statusEl = document.getElementById('logsJobStatus');
+            const refreshBtn = document.getElementById('logsRefreshBtn');
 
             title.textContent = `Logs: ${jobName}`;
             content.textContent = 'Loading...';
+            statusEl.textContent = 'Loading...';
             modal.classList.remove('hidden');
             modal.classList.add('flex');
 
             try {
-                const res = await fetch(`/api/job/${jobName}/logs?namespace=${namespace}`);
+                const res = await fetch(`/api/job/${jobName}/logs?namespace=${namespace}&tail=500`);
                 const data = await res.json();
-                content.textContent = data.logs || 'No logs available';
+                currentLogs = data.logs || 'No logs available';
+                content.textContent = currentLogs;
+
+                // Get job status
+                const statusRes = await fetch(`/api/jobs?namespace=${namespace}&limit=20`);
+                const statusData = await statusRes.json();
+                const job = statusData.jobs.find(j => j.name === jobName);
+                if (job) {
+                    statusEl.textContent = `Status: ${job.status}`;
+                    refreshBtn.classList.toggle('hidden', job.status !== 'Running');
+                }
             } catch (err) {
                 content.textContent = `Error: ${err.message}`;
+                statusEl.textContent = 'Error loading status';
+            }
+        }
+
+        async function refreshCurrentLogs() {
+            if (currentJobName) {
+                await viewLogs(currentJobName);
             }
         }
 
@@ -521,6 +710,51 @@ HTML_TEMPLATE = """
             const modal = document.getElementById('logsModal');
             modal.classList.add('hidden');
             modal.classList.remove('flex');
+        }
+
+        function copyLogs() {
+            navigator.clipboard.writeText(currentLogs).then(() => {
+                alert('Logs copied to clipboard!');
+            }).catch(err => {
+                alert('Failed to copy: ' + err);
+            });
+        }
+
+        function downloadLogsMarkdown() {
+            if (!currentJobName || !currentLogs) {
+                alert('No logs available');
+                return;
+            }
+            downloadMarkdown(currentJobName, currentLogs);
+        }
+
+        function downloadMarkdown(jobName, logs) {
+            const now = new Date().toISOString();
+            const markdown = `# Job Logs: ${jobName}
+
+## Metadata
+- **Job Name:** ${jobName}
+- **Namespace:** ${namespace}
+- **Exported:** ${now}
+
+## Logs
+
+\`\`\`
+${logs}
+\`\`\`
+
+---
+*Generated by autofix-dojo*
+`;
+            const blob = new Blob([markdown], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${jobName}-logs-${new Date().toISOString().slice(0,10)}.md`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         async function deleteJob(jobName) {
@@ -544,7 +778,10 @@ HTML_TEMPLATE = """
 
         // Close modal on escape
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeLogsModal();
+            if (e.key === 'Escape') {
+                closeLogsModal();
+                closeTriggeredJobPanel();
+            }
         });
 
         // Initial load
