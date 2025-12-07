@@ -936,6 +936,115 @@ def _create_individual_prs(
 
 
 @app.command()
+def trigger(
+    job_type: str = typer.Argument(
+        ...,
+        help="Type of job to trigger: helm-upgrade-pr, helm-scan, or vuln-scan",
+    ),
+    namespace: str = typer.Option(
+        "autofix-dojo",
+        "-n", "--namespace",
+        help="Kubernetes namespace where autofix-dojo is deployed",
+    ),
+    wait: bool = typer.Option(
+        False,
+        "--wait",
+        help="Wait for job to complete and show logs",
+    ),
+) -> None:
+    """Manually trigger an autofix-dojo job in Kubernetes.
+
+    Examples:
+        autofix trigger helm-upgrade-pr
+        autofix trigger helm-upgrade-pr --wait
+        autofix trigger helm-scan -n my-namespace
+    """
+    import subprocess
+    import time
+
+    # Map job types to cronjob names
+    cronjob_map = {
+        "helm-upgrade-pr": "autofix-dojo-helm-upgrade-pr",
+        "helm-scan": "autofix-dojo-helm-scan",
+        "vuln-scan": "autofix-dojo-vuln-scan",
+    }
+
+    if job_type not in cronjob_map:
+        typer.echo(f"❌ Unknown job type: {job_type}")
+        typer.echo(f"   Valid types: {', '.join(cronjob_map.keys())}")
+        raise typer.Exit(1)
+
+    cronjob_name = cronjob_map[job_type]
+    job_name = f"{job_type}-manual-{int(time.time())}"
+
+    typer.echo(f"🚀 Triggering {job_type} job...")
+
+    # Check if cronjob exists
+    check_result = subprocess.run(
+        ["kubectl", "get", "cronjob", cronjob_name, "-n", namespace],
+        capture_output=True, text=True
+    )
+
+    if check_result.returncode != 0:
+        typer.echo(f"❌ CronJob '{cronjob_name}' not found in namespace '{namespace}'")
+        typer.echo(f"   Make sure autofix-dojo is deployed with {job_type} enabled")
+        raise typer.Exit(1)
+
+    # Create job from cronjob
+    create_result = subprocess.run(
+        ["kubectl", "create", "job", "--from=cronjob/" + cronjob_name, job_name, "-n", namespace],
+        capture_output=True, text=True
+    )
+
+    if create_result.returncode != 0:
+        typer.echo(f"❌ Failed to create job: {create_result.stderr}")
+        raise typer.Exit(1)
+
+    typer.echo(f"✅ Job '{job_name}' created in namespace '{namespace}'")
+
+    if not wait:
+        typer.echo(f"\n📋 To watch progress:")
+        typer.echo(f"   kubectl logs -f job/{job_name} -n {namespace}")
+        return
+
+    # Wait for job to complete
+    typer.echo("\n⏳ Waiting for job to complete...")
+
+    # Wait for pod to be ready
+    for _ in range(30):
+        pod_result = subprocess.run(
+            ["kubectl", "get", "pods", "-l", f"job-name={job_name}", "-n", namespace,
+             "-o", "jsonpath={.items[0].status.phase}"],
+            capture_output=True, text=True
+        )
+        phase = pod_result.stdout.strip()
+        if phase in ["Running", "Succeeded", "Failed"]:
+            break
+        time.sleep(2)
+
+    # Stream logs
+    typer.echo("\n📜 Job logs:")
+    typer.echo("-" * 50)
+
+    subprocess.run(
+        ["kubectl", "logs", "-f", f"job/{job_name}", "-n", namespace, "--all-containers"],
+    )
+
+    # Check final status
+    status_result = subprocess.run(
+        ["kubectl", "get", "job", job_name, "-n", namespace,
+         "-o", "jsonpath={.status.conditions[0].type}"],
+        capture_output=True, text=True
+    )
+
+    if status_result.stdout.strip() == "Complete":
+        typer.echo("\n✅ Job completed successfully")
+    else:
+        typer.echo("\n❌ Job failed or timed out")
+        raise typer.Exit(1)
+
+
+@app.command()
 def version() -> None:
     """Show autofix-dojo version."""
     typer.echo("autofix-dojo v0.2.0")
