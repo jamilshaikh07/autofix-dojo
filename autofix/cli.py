@@ -1045,6 +1045,34 @@ def trigger(
 
 
 @app.command()
+def web(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+    port: int = typer.Option(8080, "--port", "-p", help="Port to bind to"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development"),
+) -> None:
+    """Start the web dashboard.
+
+    Examples:
+        autofix web
+        autofix web --port 3000
+        autofix web --reload  # For development
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo("❌ uvicorn not installed. Run: pip install uvicorn", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"🥋 Starting autofix-dojo dashboard at http://{host}:{port}")
+    uvicorn.run(
+        "autofix.web.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+    )
+
+
+@app.command()
 def version() -> None:
     """Show autofix-dojo version."""
     typer.echo("autofix-dojo v0.2.0")

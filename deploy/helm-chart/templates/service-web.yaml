@@ -1,0 +1,20 @@
+{{- if .Values.web.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "autofix-dojo.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autofix-dojo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: {{ .Values.web.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.web.service.port | default 80 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "autofix-dojo.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+{{- end }}
