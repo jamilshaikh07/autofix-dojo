@@ -8,14 +8,37 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 app = FastAPI(
     title="autofix-dojo",
     description="Autonomous Vulnerability Remediation & Helm Chart Upgrade Operator",
     version="0.2.0",
+)
+
+# Prometheus metrics
+JOBS_TRIGGERED = Counter(
+    "autofix_jobs_triggered_total",
+    "Total number of jobs triggered via UI",
+    ["job_type"]
+)
+JOBS_COMPLETED = Counter(
+    "autofix_jobs_completed_total",
+    "Total number of jobs completed",
+    ["job_type", "status"]
+)
+HELM_CHARTS_OUTDATED = Gauge(
+    "autofix_helm_charts_outdated",
+    "Number of outdated Helm charts by priority",
+    ["priority"]
+)
+API_REQUEST_DURATION = Histogram(
+    "autofix_api_request_duration_seconds",
+    "API request duration in seconds",
+    ["endpoint"]
 )
 
 
@@ -60,6 +83,12 @@ async def dashboard():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/api/cronjobs")
@@ -184,6 +213,9 @@ async def trigger_job(request: JobTriggerRequest):
 
     if code != 0:
         raise HTTPException(status_code=500, detail=f"Failed to create job: {stderr}")
+
+    # Record metrics
+    JOBS_TRIGGERED.labels(job_type=request.job_type).inc()
 
     return {
         "message": f"Job '{job_name}' created successfully",

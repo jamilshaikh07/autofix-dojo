@@ -1,4 +1,4 @@
-{{- if and .Values.controller.enabled .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -13,10 +13,10 @@ spec:
   selector:
     matchLabels:
       {{- include "autofix-dojo.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: metrics
+      app.kubernetes.io/component: web
   endpoints:
     - port: metrics
-      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" }}
       {{- if .Values.metrics.serviceMonitor.scrapeTimeout }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
       {{- end }}
