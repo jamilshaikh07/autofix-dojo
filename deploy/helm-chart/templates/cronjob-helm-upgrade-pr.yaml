@@ -45,6 +45,7 @@ spec:
                   export HOME=/tmp
                   git config --global user.email "autofix-dojo@automated.local"
                   git config --global user.name "autofix-dojo"
+                  git config --global --add safe.directory /repo
                   git clone --depth 1 --branch {{ .Values.git.mainBranch }} \
                     https://x-access-token:${GITHUB_TOKEN}@github.com/{{ .Values.helm.autoPR.repoOwner }}/{{ .Values.helm.autoPR.repoName }}.git \
                     /repo
@@ -71,13 +72,13 @@ spec:
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command:
-                - python
-                - -m
-                - autofix.cli
-                - helm-upgrade-pr
-                - /repo/{{ .Values.helm.autoPR.scanPath }}
-                - --priority
-                - {{ .Values.helm.autoPR.priority }}
+                - /bin/sh
+                - -c
+                - |
+                  git config --global --add safe.directory /repo
+                  git config --global user.email "autofix-dojo@automated.local"
+                  git config --global user.name "autofix-dojo"
+                  python -m autofix.cli helm-upgrade-pr /repo/{{ .Values.helm.autoPR.scanPath }} --priority {{ .Values.helm.autoPR.priority }}
               env:
                 - name: GITHUB_TOKEN
                   valueFrom:
