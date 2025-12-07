@@ -251,6 +251,70 @@ class HelmScanner:
         except Exception as e:
             logger.debug(f"Failed to fetch latest version for {release.chart}: {e}")
 
+    def fetch_all_versions(self, release: HelmRelease) -> list[str]:
+        """Fetch all available versions for a Helm chart from repository.
+
+        Returns a list of version strings sorted by semantic version (newest first).
+        """
+        if not release.repository:
+            return []
+
+        # Initialize repos on first use
+        self._init_repos()
+
+        repo_alias = self.KNOWN_REPOS.get(release.repository)
+        if not repo_alias:
+            # Try to add repo dynamically
+            repo_alias = release.name.replace("-", "_")
+            try:
+                subprocess.run(
+                    ["helm", "repo", "add", repo_alias, release.repository],
+                    capture_output=True,
+                    check=False,
+                    timeout=30,
+                )
+            except Exception:
+                return []
+
+        try:
+            # Use --versions flag to get all versions
+            result = subprocess.run(
+                ["helm", "search", "repo", f"{repo_alias}/{release.chart}", "--versions", "--output", "json"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,  # 60 second timeout for all versions
+            )
+            if result.returncode == 0:
+                charts = json.loads(result.stdout)
+                # Extract all versions and sort them
+                versions = [chart.get("version") for chart in charts if chart.get("version")]
+                # Sort by semantic version (newest first)
+                return self._sort_versions(versions)
+        except subprocess.TimeoutExpired:
+            logger.debug(f"Timeout fetching all versions for {release.chart}")
+        except Exception as e:
+            logger.debug(f"Failed to fetch all versions for {release.chart}: {e}")
+
+        return []
+
+    def _sort_versions(self, versions: list[str]) -> list[str]:
+        """Sort versions by semantic version, newest first."""
+        def parse_version(v: str) -> tuple[int, int, int, str]:
+            """Parse version string to tuple for sorting."""
+            v_clean = v.lstrip("v")
+            parts = re.split(r"[.\-]", v_clean)
+            try:
+                major = int(parts[0]) if len(parts) > 0 else 0
+                minor = int(parts[1]) if len(parts) > 1 else 0
+                patch = int(parts[2]) if len(parts) > 2 else 0
+                suffix = parts[3] if len(parts) > 3 else ""
+                return (major, minor, patch, suffix)
+            except (ValueError, IndexError):
+                return (0, 0, 0, v)
+
+        return sorted(versions, key=parse_version, reverse=True)
+
     def scan_argocd_apps(self, path: str | Path) -> list[HelmRelease]:
         """Scan ArgoCD Application YAML files for Helm chart sources."""
         path = Path(path)

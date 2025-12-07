@@ -464,6 +464,62 @@ def scan_images(
         typer.echo(f"\n📄 Report saved to {output}")
 
 
+def _get_next_major_version(current: str, latest: str, all_versions: list[str]) -> str:
+    """Find the next major version step between current and latest.
+
+    For example: 4.3.0 -> 11.2.0 with all versions would return 5.x.x (first 5.x version)
+    """
+    import re
+
+    def parse_version(v: str) -> tuple[int, int, int]:
+        """Parse version string to tuple, handling 'v' prefix."""
+        v = v.lstrip("v")
+        parts = re.split(r"[.\-]", v)
+        try:
+            return (int(parts[0]), int(parts[1]) if len(parts) > 1 else 0, int(parts[2]) if len(parts) > 2 else 0)
+        except (ValueError, IndexError):
+            return (0, 0, 0)
+
+    current_parsed = parse_version(current)
+    latest_parsed = parse_version(latest)
+
+    # If same major version, return latest
+    if current_parsed[0] == latest_parsed[0]:
+        return latest
+
+    # Find the highest version of the next major
+    next_major = current_parsed[0] + 1
+    target_major = latest_parsed[0]
+
+    # Filter versions that are in the next major range
+    next_major_versions = []
+    for v in all_versions:
+        parsed = parse_version(v)
+        if parsed[0] == next_major:
+            next_major_versions.append((parsed, v))
+
+    if next_major_versions:
+        # Return the highest version of next major
+        next_major_versions.sort(reverse=True)
+        return next_major_versions[0][1]
+
+    # If no versions found for next major, try to find any version > current but < latest
+    # This handles cases where major versions are skipped (e.g., no v9.x)
+    intermediate_versions = []
+    for v in all_versions:
+        parsed = parse_version(v)
+        if current_parsed < parsed < latest_parsed:
+            intermediate_versions.append((parsed, v))
+
+    if intermediate_versions:
+        intermediate_versions.sort()
+        # Return the first version after current (smallest step)
+        return intermediate_versions[0][1]
+
+    # Fallback to latest
+    return latest
+
+
 @app.command()
 def helm_upgrade_pr(
     path: str = typer.Argument(
@@ -487,6 +543,11 @@ def helm_upgrade_pr(
         "--priority",
         "-p",
         help="Minimum priority: critical, major, minor, or all",
+    ),
+    step: bool = typer.Option(
+        True,
+        "--step/--no-step",
+        help="Upgrade one major version at a time (default: True for safe upgrades)",
     ),
 ) -> None:
     """Scan for outdated Helm charts and create PRs for upgrades."""
@@ -576,14 +637,27 @@ def helm_upgrade_pr(
         # Read the source file
         content = source_path.read_text()
 
-        # Create upgrade branch
-        branch_name = f"autofix/helm-upgrade-{release.chart}-{release.latest_version}".replace(".", "-")
-        typer.echo(f"   Creating branch: {branch_name}")
-
-        # Update the version in the file
-        # Handle both Terraform and ArgoCD formats
         old_version = release.current_version
         new_version = release.latest_version
+
+        # Step mode: upgrade one major version at a time
+        if step and release.version_gap > 1:
+            typer.echo(f"   📊 Step mode: Fetching all available versions...")
+            all_versions = scanner.fetch_all_versions(release)
+
+            if all_versions:
+                typer.echo(f"   Found {len(all_versions)} versions available")
+                new_version = _get_next_major_version(old_version, release.latest_version, all_versions)
+                if new_version != release.latest_version:
+                    typer.echo(f"   🔄 Step upgrade: {old_version} → {new_version} (next step toward {release.latest_version})")
+                else:
+                    typer.echo(f"   ℹ️  No intermediate versions found, upgrading to latest")
+            else:
+                typer.echo(f"   ⚠️  Could not fetch all versions, upgrading to latest")
+
+        # Create upgrade branch
+        branch_name = f"autofix/helm-upgrade-{release.chart}-{new_version}".replace(".", "-")
+        typer.echo(f"   Creating branch: {branch_name}")
 
         # Pattern for version = "x.y.z" (Terraform)
         tf_pattern = rf'(version\s*=\s*["\'])({re.escape(old_version)})(["\'])'
@@ -654,13 +728,29 @@ def helm_upgrade_pr(
             continue
 
         # Create PR using gh CLI
+        is_step_upgrade = step and new_version != release.latest_version
         pr_title = f"chore(helm): upgrade {release.chart} to {new_version}"
+        if is_step_upgrade:
+            pr_title += f" (step 1 toward {release.latest_version})"
+
+        step_info = ""
+        if is_step_upgrade:
+            step_info = f"""
+### Step Upgrade Info
+This is a **step-by-step upgrade** for safety.
+- **Current:** {old_version}
+- **This PR:** {new_version}
+- **Final Target:** {release.latest_version}
+
+After merging this PR, autofix-dojo will create the next step PR automatically.
+"""
+
         pr_body = f"""## Helm Chart Upgrade
 
 **Chart:** {release.chart}
 **Current Version:** {old_version}
 **New Version:** {new_version}
-
+{step_info}
 ### Changes
 - Updated {relative_path}
 
