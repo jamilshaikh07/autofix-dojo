@@ -272,7 +272,7 @@ python -m autofix.cli web --reload
 
 ```bash
 # Build
-docker build -t autofix-dojo -f docker/Dockerfile .
+docker build -t autofix-dojo .
 
 # Run
 docker run --rm \
@@ -290,32 +290,40 @@ docker run --rm \
 autofix-dojo/
 ├── autofix/
 │   ├── __init__.py
-│   ├── cli.py           # Typer CLI commands
+│   ├── cli.py           # Typer CLI commands (all commands + PR helpers)
 │   ├── config.py        # Environment variable loading
 │   ├── dojo_client.py   # DefectDojo REST API client
 │   ├── fixer.py         # Version parsing and fix suggestions
-│   ├── git_client.py    # Git operations and PR creation
-│   ├── helm_scanner.py  # Helm chart version scanning
+│   ├── git_client.py    # Git operations and PR creation (gh/glab)
 │   ├── models.py        # Dataclasses (Finding, FixSuggestion, etc.)
 │   ├── slo_tracker.py   # JSON-based SLO tracking
+│   ├── helm/
+│   │   ├── scanner.py   # HelmRelease + HelmScanner (Terraform/ArgoCD/cluster)
+│   │   └── roadmap.py   # Multi-major upgrade roadmap generation
 │   └── web/
-│       └── app.py       # FastAPI web dashboard
+│       └── app.py       # FastAPI web dashboard + Prometheus metrics
 ├── deploy/
 │   ├── helm-chart/      # Helm chart for Kubernetes deployment
 │   │   ├── templates/
 │   │   │   ├── deployment-web.yaml
 │   │   │   ├── service-web.yaml
 │   │   │   ├── ingress-web.yaml
-│   │   │   ├── cronjob-*.yaml
+│   │   │   ├── cronjob-helm-scan.yaml
+│   │   │   ├── cronjob-helm-upgrade-pr.yaml
+│   │   │   ├── cronjob-vuln-scan.yaml
+│   │   │   ├── rbac.yaml
 │   │   │   └── servicemonitor.yaml
+│   │   ├── examples/
+│   │   │   ├── values-homelab.yaml
+│   │   │   ├── values-aws-eks.yaml
+│   │   │   └── values-cronjob-only.yaml
 │   │   └── values.yaml
 │   └── grafana/
 │       └── dashboard.json  # Grafana dashboard
 ├── scripts/
 │   └── seed_dojo.py     # Seed DefectDojo with test data
 ├── tests/
-├── docker/
-│   └── Dockerfile
+├── Dockerfile
 ├── .env.example
 ├── requirements.txt
 └── README.md
@@ -456,6 +464,31 @@ The `/metrics` endpoint exposes:
 | v0.6 | Helm chart upgrade automation | Done |
 | v0.7 | Web dashboard + Prometheus metrics | Done |
 | v1.0 | InfraOps Autonomous Engine | In Progress |
+
+## Homelab Deployment
+
+Currently running on a Talos Linux / Proxmox cluster:
+
+- **Namespace**: `autofix-dojo`
+- **GitOps repo**: `github.com/jamilshaikh07/talos-proxmox-gitops`
+- **Scan path**: `gitops/apps/` (ArgoCD Application manifests)
+- **Storage**: Longhorn PVC for SLO data
+- **Schedule**: Weekly on Monday (`0 0 * * 1`) for Helm jobs
+
+```bash
+# Connect to homelab cluster
+export KUBECONFIG=~/.kube/config-homelab
+
+# Check status
+kubectl get all -n autofix-dojo
+
+# View web dashboard logs
+kubectl logs -n autofix-dojo deployment/autofix-dojo-web --tail=50
+
+# Manually trigger jobs
+kubectl create job --from=cronjob/autofix-dojo-helm-upgrade-pr helm-upgrade-pr-manual-$(date +%s) -n autofix-dojo
+kubectl create job --from=cronjob/autofix-dojo-helm-scan helm-scan-manual-$(date +%s) -n autofix-dojo
+```
 
 ## Why Open Source?
 
