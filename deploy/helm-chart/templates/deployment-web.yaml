@@ -51,7 +51,7 @@ spec:
               protocol: TCP
             {{- if .Values.metrics.enabled }}
             - name: metrics
-              containerPort: {{ .Values.web.port | default 8080 }}
+              containerPort: {{ .Values.metrics.port }}
               protocol: TCP
             {{- end }}
           livenessProbe:
